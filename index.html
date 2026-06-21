@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Teacher Intelligence System</title>
+
+<link rel="stylesheet" href="styles.css">
+
+<!-- LIBRARIES -->
+
+<script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+
+<body class="dark">
+
+<!-- LOCK SCREEN OVERLAY -->
+<div id="lockScreen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #1a1a1a; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white;">
+    
+    <!-- Teacher Login View -->
+    <div id="teacherLoginView" style="display: flex; flex-direction: column; align-items: center;">
+        <h2 style="margin-bottom: 10px;">🔒 App Locked</h2>
+        <p style="margin-bottom: 20px;">Please enter the authorized Teacher PIN to continue.</p>
+        <input type="password" id="accessCode" placeholder="Enter PIN" style="padding: 10px; text-align: center; font-size: 18px; width: 200px; border-radius: 5px; border: none; margin-bottom: 15px;">
+        <button onclick="unlockApp()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; background: #4CAF50; color: white; font-weight: bold; width: 100%;">Unlock System</button>
+        <p id="lockError" style="color: #ff4c4c; margin-top: 15px; display: none;">Incorrect PIN! Access Denied.</p>
+        <button onclick="showAdminView()" style="margin-top: 20px; background: none; border: none; color: #888; text-decoration: underline; cursor: pointer;">Admin Setup</button>
+    </div>
+
+    <!-- Admin Setup View -->
+    <div id="adminLoginView" style="display: none; flex-direction: column; align-items: center;">
+        <h2 style="margin-bottom: 10px;">🛡️ Admin License Setup</h2>
+        <p style="margin-bottom: 20px; text-align: center; max-width: 300px;">Enter Admin PIN to generate a new Teacher PIN valid for 20 days.</p>
+        <input type="password" id="adminCode" placeholder="Admin PIN" style="padding: 10px; text-align: center; font-size: 18px; width: 200px; border-radius: 5px; border: none; margin-bottom: 10px;">
+        <input type="password" id="newLocalCode" placeholder="New Teacher PIN" style="padding: 10px; text-align: center; font-size: 18px; width: 200px; border-radius: 5px; border: none; margin-bottom: 15px;">
+        <button onclick="adminSetup()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; background: #2196F3; color: white; font-weight: bold; width: 100%;">Set PIN & Unlock</button>
+        <p id="adminError" style="color: #ff4c4c; margin-top: 15px; display: none;">Incorrect Admin PIN!</p>
+        <button onclick="showTeacherView()" style="margin-top: 20px; background: none; border: none; color: #888; text-decoration: underline; cursor: pointer;">Back to Login</button>
+    </div>
+
+</div>
+
+<div id="appContent" style="display: none;">
+
+<div id="snow-container"></div>
+
+<header class="header">
+
+<h1>📚 Teacher Intelligence System</h1>
+
+<button id="themeToggle">
+Toggle Theme
+</button>
+
+<button onclick="lockApp()" style="background: #ff4c4c; color: white; margin-left: 10px;">
+Lock App
+</button>
+
+</header>
+
+<!-- DASHBOARD -->
+
+<section class="dashboard">
+
+<div class="card">
+<h2>Total Students</h2>
+<p id="totalStudents">0</p>
+</div>
+
+<div class="card">
+<h2>Attendance Today</h2>
+<p id="attendanceToday">0</p>
+</div>
+
+<div class="card">
+<h2>Alerts</h2>
+<p id="alertCount">0</p>
+</div>
+
+</section>
+
+<!-- STUDENT PROFILE -->
+
+<section class="module">
+
+<h2>Add Student</h2>
+
+<input id="studentName" placeholder="Student Name">
+
+<input id="rollNo" placeholder="Roll Number">
+
+<input id="studentClass" placeholder="Class">
+
+<input id="parentName" placeholder="Parent Name">
+
+<input id="parentPhone" placeholder="Parent Phone">
+
+<input id="address" placeholder="Address">
+
+<input id="dob" type="date">
+
+<input id="bloodGroup" placeholder="Blood Group">
+
+<input id="admissionNo" placeholder="Admission Number">
+
+<button onclick="addStudent()">
+Save Student
+</button>
+
+</section>
+
+<!-- STUDENTS -->
+
+<section class="module">
+
+<h2>Students</h2>
+
+<div id="studentFilters" style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <input type="text" id="studentSearch" placeholder="Search Name/Roll..." onkeyup="renderStudentCards()" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <select id="studentClassFilter" onchange="renderStudentCards()" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+</div>
+
+<div id="studentList"></div>
+
+</section>
+
+<!-- ATTENDANCE -->
+
+<section class="module">
+
+<h2>Attendance</h2>
+
+<div id="attFilters" style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="attendanceClassFilter" onchange="filterStudentDropdown('attendanceClassFilter', 'attendanceStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="attendanceStudentList" id="attendanceStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('attendanceStudentText', 'attendanceStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="attendanceStudentList"></datalist>
+    <input type="hidden" id="attendanceStudent">
+    <input type="date" id="attendanceDate" style="padding: 10px; width: 100%; box-sizing: border-box;" title="Attendance Date">
+</div>
+
+<select id="attendanceStatus">
+
+<option>Present</option>
+<option>Absent</option>
+<option>Late</option>
+
+</select>
+
+<button onclick="markAttendance()">
+Save Attendance
+</button>
+
+</section>
+
+<!-- MARKS -->
+
+<section class="module">
+
+<h2>Marks</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="marksClassFilter" onchange="filterStudentDropdown('marksClassFilter', 'marksStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="marksStudentList" id="marksStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('marksStudentText', 'marksStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="marksStudentList"></datalist>
+    <input type="hidden" id="marksStudent">
+</div>
+
+<input id="subject" placeholder="Subject">
+
+<input id="examType" placeholder="Exam Type">
+
+<input id="marks" type="number" placeholder="Marks">
+
+<input id="totalMarks" type="number" placeholder="Total Marks">
+
+<button onclick="saveMarks()">
+Save Marks
+</button>
+
+</section>
+
+<!-- HOMEWORK -->
+
+<section class="module">
+
+<h2>Daily Homework</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="homeworkClassFilter" onchange="filterStudentDropdown('homeworkClassFilter', 'homeworkStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="homeworkStudentList" id="homeworkStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('homeworkStudentText', 'homeworkStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="homeworkStudentList"></datalist>
+    <input type="hidden" id="homeworkStudent">
+    <input type="date" id="homeworkDate" style="padding: 10px; width: 100%; box-sizing: border-box;" title="Homework Date">
+</div>
+
+<input id="homeworkSubject" placeholder="Subject (e.g. Math, Science)">
+
+<select id="homeworkStatus">
+    <option>Completed</option>
+    <option>Partially Completed</option>
+    <option>Not Submitted</option>
+</select>
+
+<button onclick="saveHomework()">
+Save Homework
+</button>
+
+</section>
+
+<!-- NOTES -->
+
+<section class="module">
+
+<h2>Teacher Notes</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="notesClassFilter" onchange="filterStudentDropdown('notesClassFilter', 'notesStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="notesStudentList" id="notesStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('notesStudentText', 'notesStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="notesStudentList"></datalist>
+    <input type="hidden" id="notesStudent">
+</div>
+
+<textarea id="teacherNote"
+placeholder="Write teacher observation"></textarea>
+
+<button onclick="saveNote()">
+Save Note
+</button>
+
+</section>
+
+<!-- BEHAVIOR -->
+
+<section class="module">
+
+<h2>Behavior Tracking</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="behaviorClassFilter" onchange="filterStudentDropdown('behaviorClassFilter', 'behaviorStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="behaviorStudentList" id="behaviorStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('behaviorStudentText', 'behaviorStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="behaviorStudentList"></datalist>
+    <input type="hidden" id="behaviorStudent">
+</div>
+
+<input id="discipline" placeholder="Discipline /5">
+
+<input id="confidence" placeholder="Confidence /5">
+
+<input id="communication" placeholder="Communication /5">
+
+<input id="leadership" placeholder="Leadership /5">
+
+<button onclick="saveBehavior()">
+Save Behavior
+</button>
+
+</section>
+
+<!-- ALERTS -->
+
+<section class="module">
+
+<h2>Student Alerts</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="alertsClassFilter" onchange="filterStudentDropdown('alertsClassFilter', 'alertsStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="alertsStudentList" id="alertsStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('alertsStudentText', 'alertsStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="alertsStudentList"></datalist>
+    <input type="hidden" id="alertsStudent">
+</div>
+
+<div id="alertsList"></div>
+
+</section>
+
+<!-- AI REPORT -->
+ 
+ <!-- TREND ANALYTICS -->
+
+<section class="module">
+
+<h2>Student Progress Trend</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="chartClassFilter" onchange="filterStudentDropdown('chartClassFilter', 'chartStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="chartStudentList" id="chartStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('chartStudentText', 'chartStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="chartStudentList"></datalist>
+    <input type="hidden" id="chartStudent">
+</div>
+
+<button onclick="generateTrendChart()">
+Generate Trend
+</button>
+
+<canvas id="trendChart"></canvas>
+
+</section>
+
+<section class="module">
+
+<h2>AI Progress Comment</h2>
+
+<div style="margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px;">
+    <select id="aiClassFilter" onchange="filterStudentDropdown('aiClassFilter', 'aiStudentList')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+        <option value="" disabled selected>Select Class First</option>
+        <option value="all">All Classes</option>
+    </select>
+    <input list="aiStudentList" id="aiStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('aiStudentText', 'aiStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
+    <datalist id="aiStudentList"></datalist>
+    <input type="hidden" id="aiStudent">
+</div>
+
+<button onclick="generateAIComment()">
+Generate Comment
+</button>
+
+<div id="aiOutput"></div>
+
+</section>
+
+<!-- REPORTS -->
+
+<section class="module">
+
+<h2>Reports & Exports</h2>
+
+<select id="reportClassFilter" style="margin-bottom: 10px; padding: 5px; width: 100%;">
+    <option value="" disabled selected>Select Class First</option>
+    <option value="all">All Classes</option>
+</select>
+
+<button onclick="downloadPDF()">
+Download PDF
+</button>
+
+<button onclick="exportExcel()">
+Export Excel
+</button>
+
+<button onclick="backupDatabase()">
+Backup JSON
+</button>
+
+</section>
+
+<!-- JS FILES -->
+
+<script src="js/db.js"></script>
+
+<script src="js/students.js"></script>
+
+<script src="js/attendance.js"></script>
+
+<script src="js/marks.js"></script>
+
+<script src="js/homework.js"></script>
+
+<script src="js/notes.js"></script>
+
+<script src="js/behavior.js"></script>
+
+<script src="js/alerts.js"></script>
+
+<script src="js/analytics.js"></script>
+
+<script src="js/reports.js"></script>
+
+<script src="js/backup.js"></script>
+
+<script src="js/ai.js"></script>
+
+<script src="js/app.js"></script>
+
+</div> <!-- END APP CONTENT -->
+
+</body>
+</html>

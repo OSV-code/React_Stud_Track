@@ -60,6 +60,10 @@
 
 <h1>📚 Teacher Intelligence System</h1>
 
+<button onclick="location.href='classwork.html'" style="background: #FF6B35; color: white; margin-left: 10px;">
+📋 Classwork
+</button>
+
 <button id="themeToggle">
 Toggle Theme
 </button>
@@ -95,7 +99,9 @@ Lock App
 
 <section class="module">
 
-<h2>Add Student</h2>
+<h2 id="studentFormTitle">Add Student</h2>
+
+<input id="studentId" type="hidden">
 
 <input id="studentName" placeholder="Student Name">
 
@@ -103,7 +109,9 @@ Lock App
 
 <input id="studentClass" placeholder="Class">
 
-<input id="parentName" placeholder="Parent Name">
+<input id="fatherName" placeholder="Father Name">
+
+<input id="motherName" placeholder="Mother Name">
 
 <input id="parentPhone" placeholder="Parent Phone">
 
@@ -115,9 +123,14 @@ Lock App
 
 <input id="admissionNo" placeholder="Admission Number">
 
-<button onclick="addStudent()">
-Save Student
-</button>
+<input id="aadharNumber" placeholder="Aadhar Number">
+
+<input id="saralPortalNumber" placeholder="Saral Portal Number">
+
+<div style="display: flex; gap: 10px;">
+  <button id="saveBtn" onclick="saveStudent()" style="flex: 1;">Save Student</button>
+  <button id="cancelBtn" onclick="cancelEdit()" style="display: none; flex: 1; background: #ff9800;">Cancel</button>
+</div>
 
 </section>
 
@@ -214,7 +227,10 @@ Save Marks
     <input list="homeworkStudentList" id="homeworkStudentText" placeholder="Search and Select Student..." oninput="updateSelectedStudent('homeworkStudentText', 'homeworkStudent')" style="padding: 10px; width: 100%; box-sizing: border-box;">
     <datalist id="homeworkStudentList"></datalist>
     <input type="hidden" id="homeworkStudent">
+    <label style="font-size: 12px; color: #aaa; margin-top: 8px; display: block;">📅 Homework Assigned Date (when given)</label>
     <input type="date" id="homeworkDate" style="padding: 10px; width: 100%; box-sizing: border-box;" title="Homework Date">
+    <label style="font-size: 12px; color: #aaa; margin-top: 8px; display: block;">⏰ Due Date (deadline)</label>
+    <input type="date" id="homeworkDueDate" style="padding: 10px; width: 100%; box-sizing: border-box;" title="Due Date">
 </div>
 
 <input id="homeworkSubject" placeholder="Subject (e.g. Math, Science)">
@@ -223,6 +239,7 @@ Save Marks
     <option>Completed</option>
     <option>Partially Completed</option>
     <option>Not Submitted</option>
+    <option>Late Submission</option>
 </select>
 
 <button onclick="saveHomework()">

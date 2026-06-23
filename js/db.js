@@ -7,7 +7,8 @@ db.version(2).stores({
         name,
         rollNo,
         className,
-        parentName,
+        fatherName,
+        motherName,
         parentPhone,
         address,
         dob,
@@ -60,7 +61,18 @@ db.version(2).stores({
         ++id,
         studentId,
         date,
+        dueDate,
         subject,
         status
+    `,
+
+    classwork: `
+        ++id,
+        date,
+        className,
+        subject,
+        photoData,
+        notes,
+        createdAt
     `
 });

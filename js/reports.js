@@ -2,6 +2,7 @@ async function downloadPDF(){
 
     const students =
     await db.students.toArray();
+    const attendance = await db.attendance.toArray();
 
     const reportClass = document.getElementById("reportClassFilter")?.value;
     let filteredStudents = students;
@@ -9,32 +10,60 @@ async function downloadPDF(){
         filteredStudents = students.filter(s => s.className === reportClass);
     }
 
+    // Add attendance percentage to each student
+    const studentDataWithAttendance = filteredStudents.map(student => {
+        const studentAttendance = attendance.filter(a => a.studentId === student.id);
+        const totalDays = studentAttendance.length;
+        const presentDays = studentAttendance.filter(a => a.status === "Present" || a.status === "Late").length;
+        const attendancePercent = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+        return {
+            ...student,
+            attendancePercent
+        };
+    });
+
     const { jsPDF } = window.jspdf;
 
-    const doc = new jsPDF();
-
-    doc.setFontSize(18);
+    const doc = new jsPDF("p", "mm", "a4");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(16);
 
     doc.text(
         (reportClass && reportClass !== "all") ? `Teacher Intelligence Report - Class ${reportClass}` : "Teacher Intelligence Report",
-        20,
-        20
+        14,
+        15
     );
 
-    let y = 40;
+    let y = 25;
+    const checkPage = () => { if(y > 270) { doc.addPage(); y = 15; } };
+    const leftMargin = 14;
+    const lineHeight = 6;
 
-    filteredStudents.forEach(student=>{
-
-        doc.text(
-
-            `${student.name} | ${student.className} | ${student.parentPhone}`,
-
-            20,
-
-            y
-        );
-
-        y += 10;
+    studentDataWithAttendance.forEach(student=>{
+        checkPage();
+        
+        doc.setFontSize(12);
+        doc.text(`${student.name} (Roll: ${student.rollNo})`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.setFontSize(10);
+        doc.text(`Class: ${student.className} | Attendance: ${student.attendancePercent}%`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.text(`Father: ${student.fatherName || 'N/A'} | Mother: ${student.motherName || 'N/A'}`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.text(`Phone: ${student.parentPhone || 'N/A'} | Address: ${student.address || 'N/A'}`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.text(`DOB: ${student.dob || 'N/A'} | Blood Group: ${student.bloodGroup || 'N/A'}`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.text(`Admission No: ${student.admissionNo || 'N/A'} | Aadhar: ${student.aadharNumber || 'N/A'}`, leftMargin, y);
+        y += lineHeight;
+        
+        doc.text(`Saral Portal: ${student.saralPortalNumber || 'N/A'}`, leftMargin, y);
+        y += lineHeight * 1.5;
     });
 
     doc.save((reportClass && reportClass !== "all") ? `students-report-class-${reportClass}.pdf` : "students-report.pdf");
@@ -44,6 +73,7 @@ async function exportExcel(){
 
     const students =
     await db.students.toArray();
+    const attendance = await db.attendance.toArray();
 
     const reportClass = document.getElementById("reportClassFilter")?.value;
     let filteredStudents = students;
@@ -51,11 +81,37 @@ async function exportExcel(){
         filteredStudents = students.filter(s => s.className === reportClass);
     }
 
+    // Add attendance percentage to each student
+    const studentDataWithAttendance = filteredStudents.map(student => {
+        const studentAttendance = attendance.filter(a => a.studentId === student.id);
+        const totalDays = studentAttendance.length;
+        const presentDays = studentAttendance.filter(a => a.status === "Present" || a.status === "Late").length;
+        const attendancePercent = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+        
+        // Return only desired fields, excluding parentName
+        return {
+            id: student.id,
+            name: student.name,
+            rollNo: student.rollNo,
+            className: student.className,
+            fatherName: student.fatherName,
+            motherName: student.motherName,
+            parentPhone: student.parentPhone,
+            address: student.address,
+            dob: student.dob,
+            bloodGroup: student.bloodGroup,
+            admissionNo: student.admissionNo,
+            aadharNumber: student.aadharNumber,
+            saralPortalNumber: student.saralPortalNumber,
+            attendancePercent: `${attendancePercent}%`
+        };
+    });
+
     const workbook =
     XLSX.utils.book_new();
 
     const groupedStudents = {};
-    filteredStudents.forEach(student => {
+    studentDataWithAttendance.forEach(student => {
         if(!groupedStudents[student.className]) groupedStudents[student.className] = [];
         groupedStudents[student.className].push(student);
     });
@@ -84,6 +140,7 @@ async function downloadStudentReport(studentId){
     const attendance = await db.attendance.where("studentId").equals(studentId).toArray();
     const notes = await db.notes.where("studentId").equals(studentId).toArray();
     const behavior = await db.behavior.where("studentId").equals(studentId).toArray();
+    const homework = await db.homework.where("studentId").equals(studentId).toArray();
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -95,8 +152,8 @@ async function downloadStudentReport(studentId){
     doc.text("Student Details", 20, 35);
     doc.setFontSize(12);
     doc.text(`Name: ${student.name} | Roll No: ${student.rollNo} | Class: ${student.className}`, 20, 45);
-    doc.text(`Parent: ${student.parentName} | Phone: ${student.parentPhone}`, 20, 52);
-    doc.text(`Address: ${student.address || 'N/A'} | DOB: ${student.dob || 'N/A'}`, 20, 59);
+    doc.text(`Father: ${student.fatherName || 'N/A'} | Mother: ${student.motherName || 'N/A'}`, 20, 52);
+    doc.text(`Phone: ${student.parentPhone} | Address: ${student.address || 'N/A'} | DOB: ${student.dob || 'N/A'}`, 20, 59);
 
     let y = 75;
     const checkPage = () => { if(y > 270) { doc.addPage(); y = 20; } };
@@ -105,6 +162,7 @@ async function downloadStudentReport(studentId){
     const totalAttendance = attendance.length;
     const present = attendance.filter(a => a.status === "Present").length;
     const late = attendance.filter(a => a.status === "Late").length;
+    const absent = attendance.filter(a => a.status === "Absent").length;
     
     // Late is technically attended, so it counts towards percentage
     const attendancePercent = totalAttendance ? Math.round(((present + late) / totalAttendance) * 100) : 0;
@@ -114,11 +172,15 @@ async function downloadStudentReport(studentId){
     doc.text("Attendance Summary", 20, y);
     y += 8;
     doc.setFontSize(12);
-    doc.text(`Total Days: ${totalAttendance} | Present: ${present} | Late: ${late} | Percentage: ${attendancePercent}%`, 20, y);
+    doc.text(`Total Days: ${totalAttendance} | Present: ${present} | Late: ${late} | Absent: ${absent} | Percentage: ${attendancePercent}%`, 20, y);
     y += 8;
     
     if (late > 0) {
         doc.text(`* Note: Student observed late attendance (${late} times), needs care.`, 20, y);
+        y += 7;
+    }
+    if (absent > 0) {
+        doc.text(`* Note: Student was absent (${absent} times), needs follow-up.`, 20, y);
         y += 7;
     }
     y += 7;
@@ -156,6 +218,28 @@ async function downloadStudentReport(studentId){
         y += 7;
         doc.text(`Communication: ${b.communication} | Leadership: ${b.leadership}`, 20, y);
         y += 10;
+    }
+
+    // Homework
+    checkPage();
+    doc.setFontSize(14);
+    doc.text("Daily Homework Details", 20, y);
+    y += 8;
+    doc.setFontSize(12);
+    if (homework.length === 0) {
+        doc.text("No homework records yet.", 20, y);
+        y += 10;
+    } else {
+        homework.slice(-10).forEach(h => {
+            checkPage();
+            const statusText = h.status === "Completed" ? "Submitted before due date" :
+                               h.status === "Partially Completed" ? "Submitted but incomplete" :
+                               h.status === "Not Submitted" ? "Missing" :
+                               h.status === "Late Submission" ? "Submitted after due date" : h.status;
+            doc.text(`${h.date}: ${h.subject} | Due: ${h.dueDate || 'N/A'} (${statusText})`, 20, y);
+            y += 7;
+        });
+        y += 5;
     }
 
     // Teacher Notes

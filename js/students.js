@@ -1,4 +1,6 @@
-async function addStudent(){
+async function saveStudent(){
+
+    const studentId = document.getElementById("studentId").value;
 
     const student = {
 
@@ -11,8 +13,11 @@ async function addStudent(){
         className:
         document.getElementById("studentClass").value,
 
-        parentName:
-        document.getElementById("parentName").value,
+        fatherName:
+        document.getElementById("fatherName").value,
+
+        motherName:
+        document.getElementById("motherName").value,
 
         parentPhone:
         document.getElementById("parentPhone").value,
@@ -27,7 +32,13 @@ async function addStudent(){
         document.getElementById("bloodGroup").value,
 
         admissionNo:
-        document.getElementById("admissionNo").value
+        document.getElementById("admissionNo").value,
+
+        aadharNumber:
+        document.getElementById("aadharNumber").value,
+
+        saralPortalNumber:
+        document.getElementById("saralPortalNumber").value
     };
 
     if(!student.name || !student.rollNo){
@@ -37,13 +48,84 @@ async function addStudent(){
         return;
     }
 
-    await db.students.add(student);
-
-    alert("Student Saved");
+    if(studentId) {
+        await db.students.update(parseInt(studentId), student);
+        alert("Student Updated");
+    } else {
+        await db.students.add(student);
+        alert("Student Saved");
+    }
 
     clearStudentForm();
-
+    cancelEdit();
     loadStudents();
+}
+
+async function editStudent(studentId) {
+    const student = await db.students.get(studentId);
+    if(!student) return;
+
+    document.getElementById("studentId").value = studentId;
+    document.getElementById("studentName").value = student.name;
+    document.getElementById("rollNo").value = student.rollNo;
+    document.getElementById("studentClass").value = student.className;
+    document.getElementById("fatherName").value = student.fatherName || "";
+    document.getElementById("motherName").value = student.motherName || "";
+    document.getElementById("parentPhone").value = student.parentPhone || "";
+    document.getElementById("address").value = student.address || "";
+    document.getElementById("dob").value = student.dob || "";
+    document.getElementById("bloodGroup").value = student.bloodGroup || "";
+    document.getElementById("admissionNo").value = student.admissionNo || "";
+    document.getElementById("aadharNumber").value = student.aadharNumber || "";
+    document.getElementById("saralPortalNumber").value = student.saralPortalNumber || "";
+
+    document.getElementById("studentFormTitle").innerText = "Edit Student";
+    document.getElementById("saveBtn").innerText = "Update Student";
+    document.getElementById("cancelBtn").style.display = "block";
+
+    document.querySelector(".module").scrollIntoView({behavior: "smooth"});
+}
+
+function cancelEdit() {
+    clearStudentForm();
+    document.getElementById("studentId").value = "";
+    document.getElementById("studentFormTitle").innerText = "Add Student";
+    document.getElementById("saveBtn").innerText = "Save Student";
+    document.getElementById("cancelBtn").style.display = "none";
+}
+
+async function deleteStudent(studentId) {
+    if(confirm("Are you sure you want to delete this student?")) {
+        await db.students.delete(studentId);
+        alert("Student Deleted");
+        loadStudents();
+    }
+}
+
+async function shareStudentReportOnWhatsApp(studentId) {
+    const student = await db.students.get(studentId);
+    if(!student) return;
+
+    // First, generate and download the PDF
+    downloadStudentReport(studentId);
+
+    // Prepare WhatsApp message
+    const message = `📋 *Student Performance Report*\n\n` +
+        `Student Name: ${student.name}\n` +
+        `Roll No: ${student.rollNo}\n` +
+        `Class: ${student.className}\n` +
+        `Father: ${student.fatherName || 'N/A'}\n` +
+        `Mother: ${student.motherName || 'N/A'}\n\n` +
+        `Please see the attached student performance report.\n\n` +
+        `- Teacher`;
+
+    // Encode message for URL
+    const encodedMessage = encodeURIComponent(message);
+
+    // Open WhatsApp
+    window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank');
+
+    alert("PDF has been generated. WhatsApp will open - please search and select the parent to share with.");
 }
 
 function clearStudentForm(){
@@ -52,12 +134,15 @@ function clearStudentForm(){
         "studentName",
         "rollNo",
         "studentClass",
-        "parentName",
+        "fatherName",
+        "motherName",
         "parentPhone",
         "address",
         "dob",
         "bloodGroup",
-        "admissionNo"
+        "admissionNo",
+        "aadharNumber",
+        "saralPortalNumber"
     ].forEach(id=>{
 
         document.getElementById(id).value="";
@@ -148,11 +233,17 @@ async function renderStudentCards() {
                 <h3>${student.name}</h3>
                 <p><b>Roll:</b> ${student.rollNo}</p>
                 <p><b>Class:</b> ${student.className}</p>
-                <p><b>Parent:</b> ${student.parentName}</p>
+                <p><b>Father:</b> ${student.fatherName || 'N/A'}</p>
+                <p><b>Mother:</b> ${student.motherName || 'N/A'}</p>
                 <p><b>Phone:</b> ${student.parentPhone}</p>
-                <button onclick="downloadStudentReport(${student.id})" class="btn-report">
-                    Download Full Report
-                </button>
+                <p><b>Aadhar:</b> ${student.aadharNumber || 'N/A'}</p>
+                <p><b>Saral Portal:</b> ${student.saralPortalNumber || 'N/A'}</p>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <button onclick="downloadStudentReport(${student.id})" class="btn-report" style="flex: 1; min-width: 120px;">Download Report</button>
+                  <button onclick="shareStudentReportOnWhatsApp(${student.id})" style="flex: 1; min-width: 120px; background: #25D366; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer;">Share on WA</button>
+                  <button onclick="editStudent(${student.id})" style="flex: 1; min-width: 100px; background: #2196F3; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer;">Edit</button>
+                  <button onclick="deleteStudent(${student.id})" style="flex: 1; min-width: 100px; background: #f44336; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
+                </div>
             </div>
             `;
         });

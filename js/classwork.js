@@ -146,7 +146,32 @@ async function generateClassworkPDF(classworkId){
     try {
         const img = new Image();
         img.onload = function() {
-            doc.addImage(classwork.photoData, 'JPEG', 14, y, 180, 140);
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 14;
+            const maxWidth = pageWidth - margin * 2;
+            const remainingHeight = pageHeight - y - margin;
+            const maxHeight = Math.min(180, remainingHeight);
+
+            const ratio = img.width / img.height;
+            let imageWidth = maxWidth;
+            let imageHeight = imageWidth / ratio;
+
+            if (imageHeight > maxHeight) {
+                imageHeight = maxHeight;
+                imageWidth = imageHeight * ratio;
+            }
+
+            let imageX = margin + (maxWidth - imageWidth) / 2;
+            let imageY = y;
+
+            if (imageHeight > remainingHeight) {
+                doc.addPage();
+                imageY = margin;
+            }
+
+            const imageType = classwork.photoData.includes('image/png') ? 'PNG' : 'JPEG';
+            doc.addImage(classwork.photoData, imageType, imageX, imageY, imageWidth, imageHeight);
             doc.save(`Classwork_${classwork.className}_${classwork.date.replace(/\//g, '-')}.pdf`);
         };
         img.src = classwork.photoData;
@@ -169,7 +194,7 @@ async function shareClassworkOnWhatsApp(classworkId){
         `Date: ${classwork.date}\n` +
         `Class: ${classwork.className}\n\n` +
         (classwork.notes ? `📝 Notes: ${classwork.notes}\n\n` : '') +
-        `Please see the attached classwork photo.\n\n` +
+        `Please see the attached classwork pdf.\n\n` +
         `- Teacher`;
 
     // Encode message for URL

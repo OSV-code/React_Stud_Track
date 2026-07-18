@@ -28,16 +28,6 @@ export async function getUserProfileRole(userId) {
   return data?.role || 'teacher'
 }
 
-export async function verifyTeacherPin(pin) {
-  const { data, error } = await supabase.rpc('teacher_verify_pin', {
-    p_pin: pin
-  })
-
-  if (error) throw error
-  const result = Array.isArray(data) ? data[0] : data
-  return result || { ok: false, message: 'PIN verification failed.' }
-}
-
 export async function adminSearchTeachers(searchTerm = '') {
   const { data, error } = await supabase.rpc('admin_search_teachers', {
     p_search: searchTerm
@@ -47,15 +37,26 @@ export async function adminSearchTeachers(searchTerm = '') {
   return data || []
 }
 
-export async function adminSetTeacherPin(teacherUserId, newPin, validDays = 15) {
-  const { data, error } = await supabase.rpc('admin_set_teacher_pin', {
+export async function adminSetTeacherPassword(teacherUserId, newPassword, validDays = 15) {
+  const { data, error } = await supabase.rpc('admin_set_teacher_password', {
     p_teacher_user_id: teacherUserId,
-    p_new_pin: newPin,
+    p_new_password: newPassword,
     p_valid_days: validDays
   })
 
   if (error) throw error
   return data
+}
+
+export async function requestPasswordReset(email) {
+  const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+  if (error) throw error
+}
+
+export async function updateOwnPassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw error
 }
 
 export async function fetchStudents() {

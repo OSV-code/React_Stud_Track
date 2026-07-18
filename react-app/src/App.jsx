@@ -7,9 +7,10 @@ import {
   deleteStudent,
   getPasswordPolicy,
   getUserProfileRole,
-  verifyTeacherPin,
   adminSearchTeachers,
-  adminSetTeacherPin
+  adminSetTeacherPassword,
+  requestPasswordReset,
+  updateOwnPassword
 } from './supabaseClient'
 import './App.css'
 
@@ -31,6 +32,7 @@ const initialStudentForm = {
 
 function App() {
   const isAdminRoute = typeof window !== 'undefined' && window.location.pathname === '/admin'
+  const isAdminLoginRoute = typeof window !== 'undefined' && window.location.pathname === '/adminlogin'
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -41,18 +43,24 @@ function App() {
   const [fullName, setFullName] = useState('')
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
-  const [authConfirmPassword, setAuthConfirmPassword] = useState('')
-  const [pinVerified, setPinVerified] = useState(false)
-  const [pinCode, setPinCode] = useState('')
-  const [pinSubmitting, setPinSubmitting] = useState(false)
-  const [pinError, setPinError] = useState('')
-  const [showAdminSetup, setShowAdminSetup] = useState(false)
+  const [accessChecked, setAccessChecked] = useState(false)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [recoveryPassword, setRecoveryPassword] = useState('')
+  const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('')
+  const [recoverySubmitting, setRecoverySubmitting] = useState(false)
+  const [recoveryError, setRecoveryError] = useState('')
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [changePasswordValue, setChangePasswordValue] = useState('')
+  const [changePasswordConfirm, setChangePasswordConfirm] = useState('')
+  const [changePasswordSubmitting, setChangePasswordSubmitting] = useState(false)
+  const [changePasswordError, setChangePasswordError] = useState('')
+  const [changePasswordNotice, setChangePasswordNotice] = useState('')
   const [teacherSearch, setTeacherSearch] = useState('')
   const [teacherList, setTeacherList] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
   const [selectedTeacher, setSelectedTeacher] = useState(null)
-  const [newTeacherPin, setNewTeacherPin] = useState('')
-  const [pinValidDays, setPinValidDays] = useState(15)
+  const [newTeacherPassword, setNewTeacherPassword] = useState('')
+  const [passwordValidDays, setPasswordValidDays] = useState(15)
   const [adminError, setAdminError] = useState('')
   const [adminNotice, setAdminNotice] = useState('')
   const [students, setStudents] = useState([])
@@ -80,9 +88,13 @@ function App() {
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+    } = supabase.auth.onAuthStateChange((event, currentSession) => {
       setSession(currentSession)
       setAuthLoading(false)
+
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+      }
     })
 
     return () => {
@@ -94,32 +106,45 @@ function App() {
   useEffect(() => {
     if (session) {
       validateSessionAndLoad()
+    } else {
+      setAccessChecked(false)
     }
   }, [session])
 
   useEffect(() => {
-    if (session && pinVerified) {
+    if (session && accessChecked) {
       loadStudents()
     }
-  }, [session, pinVerified])
+  }, [session, accessChecked])
 
   useEffect(() => {
-    if (session && userRole === 'admin' && (showAdminSetup || isAdminRoute)) {
+    if (session && userRole === 'admin' && isAdminRoute) {
       loadTeachers()
     }
-  }, [session, showAdminSetup, userRole, isAdminRoute])
+  }, [session, userRole, isAdminRoute])
 
   async function validateSessionAndLoad() {
+    setAccessChecked(false)
+
     try {
       const role = await getUserProfileRole(session.user.id)
       setUserRole(role)
+
+      // Admins are not subject to the PIN/trial expiry gate -- that gate exists
+      // only to control teacher access. There is no one above admin to reissue
+      // their PIN, so admin access relies solely on their own login password
+      // (recoverable via Forgot Password / Change Password).
+      if (role === 'admin') {
+        setAccessChecked(true)
+        return
+      }
 
       const policy = await getPasswordPolicy(session.user.id)
 
       if (!policy) {
         await supabase.auth.signOut()
         setAuthMode('login')
-        setAuthError('Account policy not found. Ask admin to run password policy backfill.')
+        setAuthError('Access not set up yet. Ask admin to issue your login PIN.')
         return
       }
 
@@ -130,14 +155,11 @@ function App() {
         await supabase.auth.signOut()
         setAuthMode('login')
         setAuthPassword('')
-        setAuthConfirmPassword('')
-        setAuthError('Password expired. Ask admin to set a new password for your account.')
+        setAuthError('Your access has expired. Ask admin to issue a new PIN.')
         return
       }
 
-      setPinVerified(false)
-      setShowAdminSetup(false)
-      setPinError('')
+      setAccessChecked(true)
     } catch (err) {
       const message = String(err?.message || '')
 
@@ -178,21 +200,9 @@ function App() {
     setAuthSubmitting(false)
   }
 
-  async function handleSignUp(event) {
-    event.preventDefault()
-
-    if (!fullName || !authEmail || !authPassword || !authConfirmPassword) {
-      setAuthError('All fields are required for signup.')
-      return
-    }
-
-    if (authPassword !== authConfirmPassword) {
-      setAuthError('Passwords do not match.')
-      return
-    }
-
-    if (authPassword.length < 6) {
-      setAuthError('Password should be at least 6 characters.')
+  async function handleRequestPasswordReset() {
+    if (!authEmail) {
+      setAuthError('Enter your email above first, then click "Forgot password?".')
       return
     }
 
@@ -200,9 +210,93 @@ function App() {
     setAuthError('')
     setAuthNotice('')
 
+    try {
+      await requestPasswordReset(authEmail)
+      setAuthNotice('Password reset email sent. Open the link in your inbox to set a new password.')
+    } catch (err) {
+      setAuthError(err.message || 'Unable to send password reset email.')
+    } finally {
+      setAuthSubmitting(false)
+    }
+  }
+
+  async function handleCompletePasswordRecovery(event) {
+    event.preventDefault()
+
+    if (!recoveryPassword || recoveryPassword.length < 6) {
+      setRecoveryError('Password must be at least 6 characters.')
+      return
+    }
+
+    if (recoveryPassword !== recoveryConfirmPassword) {
+      setRecoveryError('Passwords do not match.')
+      return
+    }
+
+    setRecoverySubmitting(true)
+    setRecoveryError('')
+
+    try {
+      await updateOwnPassword(recoveryPassword)
+      setPasswordRecovery(false)
+      setRecoveryPassword('')
+      setRecoveryConfirmPassword('')
+    } catch (err) {
+      setRecoveryError(err.message || 'Unable to update password.')
+    } finally {
+      setRecoverySubmitting(false)
+    }
+  }
+
+  async function handleChangePassword(event) {
+    event.preventDefault()
+
+    if (!changePasswordValue || changePasswordValue.length < 6) {
+      setChangePasswordError('Password must be at least 6 characters.')
+      return
+    }
+
+    if (changePasswordValue !== changePasswordConfirm) {
+      setChangePasswordError('Passwords do not match.')
+      return
+    }
+
+    setChangePasswordSubmitting(true)
+    setChangePasswordError('')
+    setChangePasswordNotice('')
+
+    try {
+      await updateOwnPassword(changePasswordValue)
+      setChangePasswordNotice('Password updated successfully.')
+      setChangePasswordValue('')
+      setChangePasswordConfirm('')
+    } catch (err) {
+      setChangePasswordError(err.message || 'Unable to update password.')
+    } finally {
+      setChangePasswordSubmitting(false)
+    }
+  }
+
+  async function handleSignUp(event) {
+    event.preventDefault()
+
+    if (!fullName || !authEmail) {
+      setAuthError('Name and email are required for signup.')
+      return
+    }
+
+    setAuthSubmitting(true)
+    setAuthError('')
+    setAuthNotice('')
+
+    // Teachers never choose their own password. A random, unusable placeholder
+    // is set here; admin later issues the real login PIN via Admin Setup, which
+    // becomes the account's actual sign-in password.
+    const placeholderPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`
+
     const { error: signUpError } = await supabase.auth.signUp({
       email: authEmail,
-      password: authPassword,
+      password: placeholderPassword,
       options: {
         data: {
           full_name: fullName
@@ -216,19 +310,21 @@ function App() {
       return
     }
 
-    setAuthNotice('Account created. If email confirmation is enabled, verify email first, then sign in.')
+    setAuthNotice('Account created. Contact your admin to receive your login PIN.')
     setAuthMode('login')
-    setAuthConfirmPassword('')
+    setFullName('')
     setAuthSubmitting(false)
   }
 
   async function handleLogout() {
     await supabase.auth.signOut()
     setUserRole('teacher')
-    setPinVerified(false)
-    setPinCode('')
-    setPinError('')
-    setShowAdminSetup(false)
+    setAccessChecked(false)
+    setShowChangePassword(false)
+    setChangePasswordValue('')
+    setChangePasswordConfirm('')
+    setChangePasswordError('')
+    setChangePasswordNotice('')
     setTeacherList([])
     setSelectedTeacher(null)
     setAdminError('')
@@ -237,36 +333,6 @@ function App() {
     setError('')
     setSearch('')
     setSelectedClass('all')
-  }
-
-  async function handleVerifyPin(event) {
-    event.preventDefault()
-
-    if (!pinCode) {
-      setPinError('Enter teacher PIN.')
-      return
-    }
-
-    setPinSubmitting(true)
-    setPinError('')
-
-    try {
-      const result = await verifyTeacherPin(pinCode)
-
-      if (!result?.ok) {
-        setPinError(result?.message || 'PIN verification failed.')
-        setPinVerified(false)
-      } else {
-        setPinVerified(true)
-        setShowAdminSetup(false)
-        setPinError('')
-      }
-    } catch (err) {
-      setPinError(err.message || 'Unable to verify PIN.')
-      setPinVerified(false)
-    } finally {
-      setPinSubmitting(false)
-    }
   }
 
   async function loadTeachers() {
@@ -296,8 +362,8 @@ function App() {
       return
     }
 
-    if (!newTeacherPin || newTeacherPin.length < 4) {
-      setAdminError('PIN must be at least 4 digits/characters.')
+    if (!newTeacherPassword || newTeacherPassword.length < 6) {
+      setAdminError('PIN must be at least 6 characters.')
       return
     }
 
@@ -306,10 +372,10 @@ function App() {
     setAdminLoading(true)
 
     try {
-      const validDays = Number(pinValidDays) || 15
-      await adminSetTeacherPin(selectedTeacher.teacher_user_id, newTeacherPin, validDays)
-      setAdminNotice(`PIN updated for ${selectedTeacher.email}`)
-      setNewTeacherPin('')
+      const validDays = Number(passwordValidDays) || 15
+      await adminSetTeacherPassword(selectedTeacher.teacher_user_id, newTeacherPassword, validDays)
+      setAdminNotice(`PIN issued for ${selectedTeacher.email}`)
+      setNewTeacherPassword('')
       await loadTeachers()
     } catch (err) {
       setAdminError(err.message || 'Unable to set teacher PIN')
@@ -401,14 +467,59 @@ function App() {
     )
   }
 
+  if (passwordRecovery) {
+    return (
+      <div className="app-shell auth-shell">
+        <section className="panel auth-card">
+          <p className="eyebrow">Teacher Intelligence</p>
+          <h1>Set a new password</h1>
+          <p className="intro">Enter a new password to complete your account reset.</p>
+
+          {recoveryError && <div className="alert error">{recoveryError}</div>}
+
+          <form className="student-form" onSubmit={handleCompletePasswordRecovery}>
+            <div className="field-grid">
+              <div className="field-group">
+                <label>New Password</label>
+                <input
+                  type="password"
+                  value={recoveryPassword}
+                  onChange={(event) => setRecoveryPassword(event.target.value)}
+                  placeholder="Min 6 characters"
+                />
+              </div>
+              <div className="field-group">
+                <label>Confirm Password</label>
+                <input
+                  type="password"
+                  value={recoveryConfirmPassword}
+                  onChange={(event) => setRecoveryConfirmPassword(event.target.value)}
+                  placeholder="Re-enter password"
+                />
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button type="submit" className="button primary" disabled={recoverySubmitting}>
+                {recoverySubmitting ? 'Updating...' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    )
+  }
+
   if (!session) {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
           <p className="eyebrow">Teacher Intelligence</p>
-          <h1>{authMode === 'login' ? 'Sign in' : 'Create first account'}</h1>
+          <h1>{isAdminLoginRoute ? 'Admin sign in' : authMode === 'login' ? 'Sign in' : 'Create first account'}</h1>
           <p className="intro">
-            {authMode === 'login'
+            {isAdminLoginRoute
+              ? 'Sign in with your admin account.'
+              : authMode === 'login'
               ? 'Login required before accessing the student dashboard.'
               : 'Create initial credentials for admin/teacher access.'}
           </p>
@@ -416,7 +527,7 @@ function App() {
           {authError && <div className="alert error">{authError}</div>}
           {authNotice && <div className="alert success">{authNotice}</div>}
 
-          {authMode === 'login' ? (
+          {isAdminLoginRoute || authMode === 'login' ? (
             <form className="student-form" onSubmit={handleLogin}>
               <div className="field-group">
                 <label>Email</label>
@@ -442,17 +553,29 @@ function App() {
                 <button type="submit" className="button primary" disabled={authSubmitting}>
                   {authSubmitting ? 'Signing in...' : 'Sign in'}
                 </button>
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    setAuthMode('signup')
-                    setAuthError('')
-                    setAuthNotice('')
-                  }}
-                >
-                  First-time setup
-                </button>
+                {!isAdminLoginRoute && (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      setAuthMode('signup')
+                      setAuthError('')
+                      setAuthNotice('')
+                    }}
+                  >
+                    First-time setup
+                  </button>
+                )}
+                {isAdminLoginRoute && (
+                  <button
+                    type="button"
+                    className="button tertiary"
+                    onClick={handleRequestPasswordReset}
+                    disabled={authSubmitting}
+                  >
+                    Forgot password?
+                  </button>
+                )}
               </div>
             </form>
           ) : (
@@ -477,26 +600,9 @@ function App() {
                 />
               </div>
 
-              <div className="field-grid">
-                <div className="field-group">
-                  <label>Password</label>
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(event) => setAuthPassword(event.target.value)}
-                    placeholder="Min 6 characters"
-                  />
-                </div>
-                <div className="field-group">
-                  <label>Confirm Password</label>
-                  <input
-                    type="password"
-                    value={authConfirmPassword}
-                    onChange={(event) => setAuthConfirmPassword(event.target.value)}
-                    placeholder="Re-enter password"
-                  />
-                </div>
-              </div>
+              <p className="intro">
+                No password needed here. After your account is created, contact your admin to receive your login PIN.
+              </p>
 
               <div className="form-actions">
                 <button type="submit" className="button primary" disabled={authSubmitting}>
@@ -571,7 +677,7 @@ function App() {
                     onClick={() => setSelectedTeacher(teacher)}
                   >
                     <span>{teacher.email}</span>
-                    <small>{teacher.full_name || 'No name'} | Expires: {teacher.pin_expires_at || 'Not set'}</small>
+                    <small>{teacher.full_name || 'No name'} | Expires: {teacher.password_expires_at || 'Not set'}</small>
                   </button>
                 ))}
                 {!teacherList.length && <p className="intro">No teachers found yet. Run search to load list.</p>}
@@ -582,8 +688,8 @@ function App() {
                   <label>New Teacher PIN</label>
                   <input
                     type="password"
-                    value={newTeacherPin}
-                    onChange={(event) => setNewTeacherPin(event.target.value)}
+                    value={newTeacherPassword}
+                    onChange={(event) => setNewTeacherPassword(event.target.value)}
                     placeholder="Set new PIN"
                   />
                 </div>
@@ -594,8 +700,8 @@ function App() {
                     type="number"
                     min="1"
                     max="90"
-                    value={pinValidDays}
-                    onChange={(event) => setPinValidDays(event.target.value)}
+                    value={passwordValidDays}
+                    onChange={(event) => setPasswordValidDays(event.target.value)}
                   />
                 </div>
 
@@ -608,6 +714,58 @@ function App() {
                   </a>
                 </div>
               </form>
+
+              <div className="panel-head" style={{ marginTop: '2rem' }}>
+                <div>
+                  <p className="eyebrow">My account</p>
+                  <h2>Change my password</h2>
+                </div>
+                <button
+                  type="button"
+                  className="button tertiary"
+                  onClick={() => {
+                    setShowChangePassword((value) => !value)
+                    setChangePasswordError('')
+                    setChangePasswordNotice('')
+                  }}
+                >
+                  {showChangePassword ? 'Cancel' : 'Change Password'}
+                </button>
+              </div>
+
+              {showChangePassword && (
+                <form className="student-form" onSubmit={handleChangePassword}>
+                  {changePasswordError && <div className="alert error">{changePasswordError}</div>}
+                  {changePasswordNotice && <div className="alert success">{changePasswordNotice}</div>}
+
+                  <div className="field-grid">
+                    <div className="field-group">
+                      <label>New Password</label>
+                      <input
+                        type="password"
+                        value={changePasswordValue}
+                        onChange={(event) => setChangePasswordValue(event.target.value)}
+                        placeholder="Min 6 characters"
+                      />
+                    </div>
+                    <div className="field-group">
+                      <label>Confirm Password</label>
+                      <input
+                        type="password"
+                        value={changePasswordConfirm}
+                        onChange={(event) => setChangePasswordConfirm(event.target.value)}
+                        placeholder="Re-enter password"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-actions">
+                    <button type="submit" className="button primary" disabled={changePasswordSubmitting}>
+                      {changePasswordSubmitting ? 'Updating...' : 'Update My Password'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
         </section>
@@ -615,132 +773,12 @@ function App() {
     )
   }
 
-  if (!pinVerified) {
+  if (!accessChecked) {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
           <p className="eyebrow">Teacher Intelligence</p>
-          <h1>{showAdminSetup ? 'Admin Setup' : 'App Locked'}</h1>
-          <p className="intro">
-            {showAdminSetup
-              ? 'Search teacher and set a new PIN validity period.'
-              : 'Enter teacher PIN to continue to the dashboard.'}
-          </p>
-
-          {!showAdminSetup && pinError && <div className="alert error">{pinError}</div>}
-
-          {!showAdminSetup ? (
-            <form className="student-form" onSubmit={handleVerifyPin}>
-              <div className="field-group">
-                <label>Teacher PIN</label>
-                <input
-                  type="password"
-                  value={pinCode}
-                  onChange={(event) => setPinCode(event.target.value)}
-                  placeholder="Enter PIN"
-                />
-              </div>
-
-              <div className="form-actions">
-                <button type="submit" className="button primary" disabled={pinSubmitting}>
-                  {pinSubmitting ? 'Verifying...' : 'Unlock System'}
-                </button>
-                {userRole === 'admin' && (
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => {
-                      setShowAdminSetup(true)
-                      setAdminError('')
-                      setAdminNotice('')
-                    }}
-                  >
-                    Admin Setup
-                  </button>
-                )}
-                <a href="/admin" className="button tertiary" role="button">
-                  Admin Page
-                </a>
-                <button type="button" className="button tertiary" onClick={handleLogout}>
-                  Sign out
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="student-form">
-              {adminError && <div className="alert error">{adminError}</div>}
-              {adminNotice && <div className="alert success">{adminNotice}</div>}
-
-              <form className="admin-search" onSubmit={handleAdminSearch}>
-                <div className="field-group">
-                  <label>Search teacher by email/name</label>
-                  <input
-                    value={teacherSearch}
-                    onChange={(event) => setTeacherSearch(event.target.value)}
-                    placeholder="teacher@example.com"
-                  />
-                </div>
-                <button type="submit" className="button secondary" disabled={adminLoading}>
-                  {adminLoading ? 'Searching...' : 'Search'}
-                </button>
-              </form>
-
-              <div className="teacher-list">
-                {teacherList.map((teacher) => (
-                  <button
-                    key={teacher.teacher_user_id}
-                    type="button"
-                    className={`teacher-row ${selectedTeacher?.teacher_user_id === teacher.teacher_user_id ? 'active' : ''}`}
-                    onClick={() => setSelectedTeacher(teacher)}
-                  >
-                    <span>{teacher.email}</span>
-                    <small>{teacher.full_name || 'No name'} | Expires: {teacher.pin_expires_at || 'Not set'}</small>
-                  </button>
-                ))}
-                {!teacherList.length && <p className="intro">No teachers found yet. Try search with empty text.</p>}
-              </div>
-
-              <form className="student-form" onSubmit={handleSetTeacherPin}>
-                <div className="field-group">
-                  <label>New Teacher PIN</label>
-                  <input
-                    type="password"
-                    value={newTeacherPin}
-                    onChange={(event) => setNewTeacherPin(event.target.value)}
-                    placeholder="Set new PIN"
-                  />
-                </div>
-
-                <div className="field-group">
-                  <label>Validity Days</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="90"
-                    value={pinValidDays}
-                    onChange={(event) => setPinValidDays(event.target.value)}
-                  />
-                </div>
-
-                <div className="form-actions">
-                  <button type="submit" className="button primary" disabled={adminLoading}>
-                    Set PIN & Unlock
-                  </button>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => {
-                      setShowAdminSetup(false)
-                      setAdminError('')
-                      setAdminNotice('')
-                    }}
-                  >
-                    Back to PIN Login
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
+          <h1>Checking access...</h1>
         </section>
       </div>
     )
@@ -756,6 +794,11 @@ function App() {
         </div>
         <div className="header-actions">
           <span className="session-email">{session.user.email}</span>
+          {userRole === 'admin' && (
+            <a href="/admin" className="button tertiary" role="button">
+              Admin Setup
+            </a>
+          )}
           <button type="button" className="button secondary" onClick={handleLogout}>
             Sign out
           </button>

@@ -19,10 +19,12 @@ html,
 body,
 #root {
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
+  width: 100%;
   background: radial-gradient(circle at top left, rgba(124, 92, 255, 0.18), transparent 22%),
     radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 20%),
     #090b16;

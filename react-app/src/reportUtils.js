@@ -18,6 +18,13 @@ function attendanceStatsFor(studentId, attendanceRecords) {
   return { total, present, late, absent, percent }
 }
 
+function marksStatsFor(studentId, marksRecords) {
+  const records = marksRecords.filter((record) => record.student_id === studentId)
+  const totalPercent = records.reduce((sum, record) => sum + (record.score / record.total_marks) * 100, 0)
+  const average = records.length > 0 ? Math.round(totalPercent / records.length) : 0
+  return { records, average }
+}
+
 export function downloadClassPdfReport(students, attendanceRecords, classFilter) {
   const doc = new jsPDF('p', 'mm', 'a4')
   doc.setFont('helvetica', 'normal')
@@ -106,7 +113,7 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-export function downloadStudentPdfReport(student, attendanceRecords) {
+export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = []) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
@@ -151,13 +158,28 @@ export function downloadStudentPdfReport(student, attendanceRecords) {
   }
   y += 7
 
+  const marksStats = marksStatsFor(student.id, marksRecords)
+
   checkPage()
   doc.setFontSize(14)
   doc.text('Academic Performance', 20, y)
   y += 8
   doc.setFontSize(12)
-  doc.text('No marks recorded yet.', 20, y)
-  y += 10
+
+  if (marksStats.records.length === 0) {
+    doc.text('No marks recorded yet.', 20, y)
+    y += 10
+  } else {
+    marksStats.records.forEach((mark) => {
+      checkPage()
+      const percent = Math.round((mark.score / mark.total_marks) * 100)
+      doc.text(`${mark.subject} (${mark.exam_type}) - ${mark.score}/${mark.total_marks} (${percent}%) - ${mark.exam_date}`, 20, y)
+      y += 7
+    })
+    checkPage()
+    doc.text(`Average: ${marksStats.average}%`, 20, y)
+    y += 10
+  }
 
   checkPage()
   doc.setFontSize(14)
@@ -196,15 +218,19 @@ export function downloadJsonBackup(students, attendanceRecords) {
   URL.revokeObjectURL(url)
 }
 
-export function shareStudentReportOnWhatsApp(student) {
+export function shareStudentReportOnWhatsApp(student, marksRecords = []) {
+  const marksStats = marksStatsFor(student.id, marksRecords)
+  const marksLine = marksStats.records.length > 0 ? `Average Marks: ${marksStats.average}%\n` : ''
+
   const message =
     `📋 *Student Performance Report*\n\n` +
     `Student Name: ${student.name}\n` +
     `Roll No: ${student.rollNo}\n` +
     `Class: ${student.className}\n` +
     `Father: ${student.fatherName || 'N/A'}\n` +
-    `Mother: ${student.motherName || 'N/A'}\n\n` +
-    `Please see the attached student performance report.\n\n` +
+    `Mother: ${student.motherName || 'N/A'}\n` +
+    marksLine +
+    `\nPlease see the attached student performance report.\n\n` +
     `- Teacher`
 
   const encodedMessage = encodeURIComponent(message)

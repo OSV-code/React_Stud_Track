@@ -13,7 +13,14 @@ import {
   updateOwnPassword,
   fetchAttendanceByDate,
   fetchAllAttendance,
-  saveAttendanceRecords
+  saveAttendanceRecords,
+  fetchClassworkEntries,
+  addClasswork,
+  deleteClasswork,
+  getClassworkPhotoUrl,
+  fetchAllMarks,
+  addMark,
+  deleteMark
 } from './supabaseClient'
 import {
   downloadClassPdfReport,
@@ -22,12 +29,24 @@ import {
   downloadJsonBackup,
   shareStudentReportOnWhatsApp
 } from './reportUtils'
+import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
 import './App.css'
 
 function getTodayDateString() {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
   return local.toISOString().slice(0, 10)
+}
+
+function marksPercent(score, total) {
+  if (!total) return 0
+  return Math.round((Number(score) / Number(total)) * 100)
+}
+
+function marksTier(percent) {
+  if (percent < 40) return 'low'
+  if (percent < 75) return 'mid'
+  return 'high'
 }
 
 const initialStudentForm = {
@@ -46,9 +65,29 @@ const initialStudentForm = {
   saralPortalNumber: ''
 }
 
+const initialClassworkForm = {
+  classworkDate: getTodayDateString(),
+  className: '',
+  subject: '',
+  notes: '',
+  photoFile: null
+}
+
+const initialMarksForm = {
+  classFilter: 'all',
+  studentId: '',
+  subject: '',
+  examType: 'Unit Test',
+  score: '',
+  totalMarks: '100',
+  examDate: getTodayDateString()
+}
+
 function App() {
   const isAdminRoute = typeof window !== 'undefined' && window.location.pathname === '/admin'
   const isAdminLoginRoute = typeof window !== 'undefined' && window.location.pathname === '/adminlogin'
+  const isClassworkRoute = typeof window !== 'undefined' && window.location.pathname === '/classwork'
+  const isMarksRoute = typeof window !== 'undefined' && window.location.pathname === '/marks'
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -96,6 +135,21 @@ function App() {
   const [allAttendance, setAllAttendance] = useState([])
   const [reportClassFilter, setReportClassFilter] = useState('all')
   const [reportsError, setReportsError] = useState('')
+  const [classworkForm, setClassworkForm] = useState(initialClassworkForm)
+  const [classworkEntries, setClassworkEntries] = useState([])
+  const [classworkClassFilter, setClassworkClassFilter] = useState('all')
+  const [classworkPhotoUrls, setClassworkPhotoUrls] = useState({})
+  const [classworkLoading, setClassworkLoading] = useState(false)
+  const [classworkSaving, setClassworkSaving] = useState(false)
+  const [classworkError, setClassworkError] = useState('')
+  const [classworkNotice, setClassworkNotice] = useState('')
+  const [marksForm, setMarksForm] = useState(initialMarksForm)
+  const [marksEntries, setMarksEntries] = useState([])
+  const [marksClassFilter, setMarksClassFilter] = useState('all')
+  const [marksLoading, setMarksLoading] = useState(false)
+  const [marksSaving, setMarksSaving] = useState(false)
+  const [marksError, setMarksError] = useState('')
+  const [marksNotice, setMarksNotice] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -165,6 +219,48 @@ function App() {
       loadAllAttendance()
     }
   }, [session, accessChecked, students])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadClasswork()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadMarks()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadPhotoUrls() {
+      const entries = classworkEntries.filter((entry) => entry.photo_path && !classworkPhotoUrls[entry.id])
+      if (entries.length === 0) return
+
+      const results = await Promise.all(
+        entries.map(async (entry) => {
+          try {
+            const url = await getClassworkPhotoUrl(entry.photo_path)
+            return [entry.id, url]
+          } catch {
+            return [entry.id, null]
+          }
+        })
+      )
+
+      if (!isCancelled) {
+        setClassworkPhotoUrls((prev) => ({ ...prev, ...Object.fromEntries(results) }))
+      }
+    }
+
+    loadPhotoUrls()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [classworkEntries])
 
   async function validateSessionAndLoad() {
     setAccessChecked(false)
@@ -584,7 +680,7 @@ function App() {
   function handleDownloadStudentReport(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance)
+      downloadStudentPdfReport(student, allAttendance, marksEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to generate student report')
     }
@@ -593,10 +689,150 @@ function App() {
   function handleShareStudentWhatsApp(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance)
-      shareStudentReportOnWhatsApp(student)
+      downloadStudentPdfReport(student, allAttendance, marksEntries)
+      shareStudentReportOnWhatsApp(student, marksEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to share student report')
+    }
+  }
+
+  async function loadClasswork() {
+    setClassworkLoading(true)
+    setClassworkError('')
+
+    try {
+      const entries = await fetchClassworkEntries()
+      setClassworkEntries(entries)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to load classwork entries')
+    } finally {
+      setClassworkLoading(false)
+    }
+  }
+
+  function handleClassworkFieldChange(field, value) {
+    setClassworkForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveClasswork(e) {
+    e.preventDefault()
+    setClassworkError('')
+    setClassworkNotice('')
+
+    if (!classworkForm.classworkDate) {
+      setClassworkError('Please select a date.')
+      return
+    }
+    if (!classworkForm.className) {
+      setClassworkError('Please select a class.')
+      return
+    }
+
+    setClassworkSaving(true)
+
+    try {
+      await addClasswork(classworkForm)
+      setClassworkForm(initialClassworkForm)
+      setClassworkNotice('Classwork saved successfully.')
+      await loadClasswork()
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to save classwork')
+    } finally {
+      setClassworkSaving(false)
+    }
+  }
+
+  async function handleDeleteClasswork(entry) {
+    if (!window.confirm('Delete this classwork entry permanently?')) return
+
+    try {
+      await deleteClasswork(entry)
+      await loadClasswork()
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to delete classwork entry')
+    }
+  }
+
+  async function handleDownloadClasswork(entry) {
+    setClassworkError('')
+    try {
+      const photoUrl = classworkPhotoUrls[entry.id] || (entry.photo_path ? await getClassworkPhotoUrl(entry.photo_path) : null)
+      await downloadClassworkPdf(entry, photoUrl)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to generate classwork PDF')
+    }
+  }
+
+  async function handleShareClassworkWhatsApp(entry) {
+    await handleDownloadClasswork(entry)
+    shareClassworkOnWhatsApp(entry)
+  }
+
+  async function loadMarks() {
+    setMarksLoading(true)
+    setMarksError('')
+
+    try {
+      const entries = await fetchAllMarks()
+      setMarksEntries(entries)
+    } catch (err) {
+      setMarksError(err.message || 'Unable to load marks')
+    } finally {
+      setMarksLoading(false)
+    }
+  }
+
+  function handleMarksFieldChange(field, value) {
+    setMarksForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveMarks(e) {
+    e.preventDefault()
+    setMarksError('')
+    setMarksNotice('')
+
+    if (!marksForm.studentId) {
+      setMarksError('Please select a student.')
+      return
+    }
+    if (!marksForm.subject.trim()) {
+      setMarksError('Please enter a subject.')
+      return
+    }
+    if (marksForm.score === '' || marksForm.totalMarks === '') {
+      setMarksError('Please enter score and total marks.')
+      return
+    }
+
+    setMarksSaving(true)
+
+    try {
+      await addMark({
+        studentId: marksForm.studentId,
+        subject: marksForm.subject.trim(),
+        examType: marksForm.examType,
+        score: Number(marksForm.score),
+        totalMarks: Number(marksForm.totalMarks),
+        examDate: marksForm.examDate
+      })
+      setMarksForm((prev) => ({ ...initialMarksForm, classFilter: prev.classFilter, studentId: prev.studentId }))
+      setMarksNotice('Marks saved successfully.')
+      await loadMarks()
+    } catch (err) {
+      setMarksError(err.message || 'Unable to save marks')
+    } finally {
+      setMarksSaving(false)
+    }
+  }
+
+  async function handleDeleteMark(entry) {
+    if (!window.confirm('Delete this marks entry permanently?')) return
+
+    try {
+      await deleteMark(entry.id)
+      await loadMarks()
+    } catch (err) {
+      setMarksError(err.message || 'Unable to delete marks entry')
     }
   }
 
@@ -620,6 +856,45 @@ function App() {
       setAttendanceIndex(0)
     }
   }, [attendanceStudents, attendanceIndex])
+
+  const filteredClassworkEntries = useMemo(
+    () =>
+      classworkClassFilter === 'all'
+        ? classworkEntries
+        : classworkEntries.filter((entry) => entry.className === classworkClassFilter),
+    [classworkEntries, classworkClassFilter]
+  )
+
+  const studentsById = useMemo(() => {
+    const map = new Map()
+    students.forEach((student) => map.set(student.id, student))
+    return map
+  }, [students])
+
+  const marksFormStudents = useMemo(
+    () =>
+      marksForm.classFilter === 'all'
+        ? students
+        : students.filter((student) => student.className === marksForm.classFilter),
+    [students, marksForm.classFilter]
+  )
+
+  const marksEntriesWithStudent = useMemo(
+    () =>
+      marksEntries.map((entry) => ({
+        ...entry,
+        student: studentsById.get(entry.student_id) || null
+      })),
+    [marksEntries, studentsById]
+  )
+
+  const filteredMarksEntries = useMemo(
+    () =>
+      marksClassFilter === 'all'
+        ? marksEntriesWithStudent
+        : marksEntriesWithStudent.filter((entry) => entry.student?.className === marksClassFilter),
+    [marksEntriesWithStudent, marksClassFilter]
+  )
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch = [student.name, student.rollNo, student.className]
@@ -961,6 +1236,352 @@ function App() {
     )
   }
 
+  if (isClassworkRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Classwork</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Classwork</p>
+                <h2>Add classwork entry</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveClasswork}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="classworkDate">Date</label>
+                  <input
+                    id="classworkDate"
+                    type="date"
+                    value={classworkForm.classworkDate}
+                    onChange={(e) => handleClassworkFieldChange('classworkDate', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkClassName">Class</label>
+                  <input
+                    id="classworkClassName"
+                    value={classworkForm.className}
+                    onChange={(e) => handleClassworkFieldChange('className', e.target.value)}
+                    placeholder="e.g. 8A"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkSubject">Subject</label>
+                  <input
+                    id="classworkSubject"
+                    value={classworkForm.subject}
+                    onChange={(e) => handleClassworkFieldChange('subject', e.target.value)}
+                    placeholder="e.g. Mathematics"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkPhoto">Photo (optional)</label>
+                  <input
+                    id="classworkPhoto"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleClassworkFieldChange('photoFile', e.target.files?.[0] || null)}
+                  />
+                </div>
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="classworkNotes">Notes / Instructions</label>
+                <textarea
+                  id="classworkNotes"
+                  rows={3}
+                  value={classworkForm.notes}
+                  onChange={(e) => handleClassworkFieldChange('notes', e.target.value)}
+                  placeholder="Optional notes for students or parents"
+                />
+              </div>
+
+              {classworkError && <div className="alert error">{classworkError}</div>}
+              {classworkNotice && <div className="alert notice">{classworkNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={classworkSaving}>
+                  {classworkSaving ? 'Saving...' : 'Save Classwork'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Classwork gallery</p>
+                <h2>Classwork history</h2>
+              </div>
+              <div className="filter-row">
+                <select value={classworkClassFilter} onChange={(e) => setClassworkClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {classworkLoading && <p className="empty-state">Loading classwork...</p>}
+
+            {!classworkLoading && filteredClassworkEntries.length === 0 && (
+              <p className="empty-state">No classwork entries yet. Add one above.</p>
+            )}
+
+            {!classworkLoading && filteredClassworkEntries.length > 0 && (
+              <div className="classwork-gallery">
+                {filteredClassworkEntries.map((entry) => (
+                  <div className="classwork-card" key={entry.id}>
+                    {classworkPhotoUrls[entry.id] && (
+                      <img
+                        className="classwork-photo"
+                        src={classworkPhotoUrls[entry.id]}
+                        alt={entry.subject || 'Classwork'}
+                      />
+                    )}
+                    <p className="classwork-subject">{entry.subject || 'No Subject'}</p>
+                    <p className="classwork-meta">
+                      📅 {entry.classwork_date} | 📚 Class: {entry.className}
+                    </p>
+                    {entry.notes && <p className="classwork-notes">&quot;{entry.notes}&quot;</p>}
+                    <div className="classwork-actions">
+                      <button className="button tertiary" onClick={() => handleDownloadClasswork(entry)}>
+                        Download PDF
+                      </button>
+                      <button className="button tertiary" onClick={() => handleShareClassworkWhatsApp(entry)}>
+                        Share WA
+                      </button>
+                      <button className="button danger" onClick={() => handleDeleteClasswork(entry)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
+  if (isMarksRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Marks / Exam Tracking</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Marks</p>
+                <h2>Add exam marks</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveMarks}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="marksClassFilterInput">Class</label>
+                  <select
+                    id="marksClassFilterInput"
+                    value={marksForm.classFilter}
+                    onChange={(e) => handleMarksFieldChange('classFilter', e.target.value)}
+                  >
+                    {classes.map((className) => (
+                      <option key={className} value={className}>
+                        {className === 'all' ? 'All classes' : className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksStudentId">Student</label>
+                  <select
+                    id="marksStudentId"
+                    value={marksForm.studentId}
+                    onChange={(e) => handleMarksFieldChange('studentId', e.target.value)}
+                  >
+                    <option value="">Select student</option>
+                    {marksFormStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksSubject">Subject</label>
+                  <input
+                    id="marksSubject"
+                    value={marksForm.subject}
+                    onChange={(e) => handleMarksFieldChange('subject', e.target.value)}
+                    placeholder="e.g. Mathematics"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksExamType">Exam Type</label>
+                  <select
+                    id="marksExamType"
+                    value={marksForm.examType}
+                    onChange={(e) => handleMarksFieldChange('examType', e.target.value)}
+                  >
+                    <option value="Unit Test">Unit Test</option>
+                    <option value="Mid Term">Mid Term</option>
+                    <option value="Final Exam">Final Exam</option>
+                    <option value="Assignment">Assignment</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksScore">Score</label>
+                  <input
+                    id="marksScore"
+                    type="number"
+                    min="0"
+                    value={marksForm.score}
+                    onChange={(e) => handleMarksFieldChange('score', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksTotalMarks">Total Marks</label>
+                  <input
+                    id="marksTotalMarks"
+                    type="number"
+                    min="1"
+                    value={marksForm.totalMarks}
+                    onChange={(e) => handleMarksFieldChange('totalMarks', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksExamDate">Exam Date</label>
+                  <input
+                    id="marksExamDate"
+                    type="date"
+                    value={marksForm.examDate}
+                    onChange={(e) => handleMarksFieldChange('examDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {marksError && <div className="alert error">{marksError}</div>}
+              {marksNotice && <div className="alert notice">{marksNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={marksSaving}>
+                  {marksSaving ? 'Saving...' : 'Save Marks'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Exam history</p>
+                <h2>Marks records</h2>
+              </div>
+              <div className="filter-row">
+                <select value={marksClassFilter} onChange={(e) => setMarksClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {marksLoading && <p className="empty-state">Loading marks...</p>}
+
+            {!marksLoading && filteredMarksEntries.length === 0 && (
+              <p className="empty-state">No marks recorded yet. Add one above.</p>
+            )}
+
+            {!marksLoading && filteredMarksEntries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Class</th>
+                      <th>Subject</th>
+                      <th>Exam Type</th>
+                      <th>Score</th>
+                      <th>Percent</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMarksEntries.map((entry) => {
+                      const percent = marksPercent(entry.score, entry.total_marks)
+                      return (
+                        <tr key={entry.id}>
+                          <td data-label="Student">{entry.student?.name || 'Unknown'}</td>
+                          <td data-label="Class">{entry.student?.className || '—'}</td>
+                          <td data-label="Subject">{entry.subject}</td>
+                          <td data-label="Exam Type">{entry.exam_type}</td>
+                          <td data-label="Score">
+                            {entry.score} / {entry.total_marks}
+                          </td>
+                          <td data-label="Percent">
+                            <span className={`marks-badge ${marksTier(percent)}`}>{percent}%</span>
+                          </td>
+                          <td data-label="Date">{entry.exam_date}</td>
+                          <td className="table-actions" data-label="Actions">
+                            <button className="button danger" onClick={() => handleDeleteMark(entry)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -970,6 +1591,12 @@ function App() {
         </div>
         <div className="header-actions">
           <span className="session-email">{session.user.email}</span>
+          <a href="/classwork" className="button tertiary" role="button">
+            Classwork
+          </a>
+          <a href="/marks" className="button tertiary" role="button">
+            Marks
+          </a>
           {userRole === 'admin' && (
             <a href="/admin" className="button tertiary" role="button">
               Admin Setup

@@ -268,6 +268,88 @@ tbody tr:hover {
   padding: 40px 0;
 }
 
+.attendance-card {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  max-width: 420px;
+  margin: 8px auto 0;
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+}
+
+.attendance-card-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.attendance-card-meta {
+  margin: 0;
+  color: var(--muted);
+}
+
+.attendance-status-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.status-button {
+  border: 1px solid rgba(124, 92, 255, 0.5);
+  border-radius: 16px;
+  padding: 12px 22px;
+  min-width: 110px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--accent);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.status-button:hover {
+  transform: translateY(-1px);
+}
+
+.status-button.active {
+  background: linear-gradient(135deg, var(--accent), #6d53ff);
+  color: white;
+  box-shadow: 0 18px 40px rgba(124, 92, 255, 0.22);
+}
+
+.attendance-pagination {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.pagination-button {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+  font-size: 1rem;
+}
+
+.pagination-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination-status {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .table-actions {
   display: flex;
   gap: 10px;
@@ -336,5 +418,116 @@ tbody tr:hover {
 
   .table-wrapper {
     min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    width: calc(100% - 20px);
+    padding: 20px 0 32px;
+  }
+
+  .app-header,
+  .panel {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .header-actions .button,
+  .header-actions a.button {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .panel-table .filter-row,
+  .filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-row input,
+  .filter-row select {
+    width: 100%;
+  }
+
+  .button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Turn the roster table into a stacked card list so rows never need horizontal scrolling. */
+  .panel-table table {
+    min-width: 0;
+  }
+
+  .panel-table table thead {
+    display: none;
+  }
+
+  .panel-table table,
+  .panel-table table tbody,
+  .panel-table table tr,
+  .panel-table table td {
+    display: block;
+    width: 100%;
+  }
+
+  .panel-table table tr {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .panel-table table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    text-align: right;
+  }
+
+  .panel-table table td:last-child {
+    border-bottom: none;
+  }
+
+  .panel-table table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+  }
+
+  .panel-table table td.table-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .panel-table table td.table-actions::before {
+    margin-bottom: 6px;
+  }
+
+  .attendance-card {
+    max-width: 100%;
+    padding: 22px;
+  }
+
+  .attendance-status-group,
+  .attendance-pagination {
+    width: 100%;
+  }
+
+  .status-button {
+    flex: 1 1 100px;
   }
 }

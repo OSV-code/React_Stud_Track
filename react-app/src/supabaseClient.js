@@ -82,3 +82,23 @@ export async function deleteStudent(id) {
   if (error) throw error
   return data
 }
+
+export async function fetchAttendanceByDate(date) {
+  const { data, error } = await supabase.from('attendance').select('*').eq('attendance_date', date)
+  if (error) throw error
+  return data || []
+}
+
+export async function fetchAllAttendance() {
+  const { data, error } = await supabase.from('attendance').select('*')
+  if (error) throw error
+  return data || []
+}
+
+export async function saveAttendanceRecords(records) {
+  const { data, error } = await supabase
+    .from('attendance')
+    .upsert(records, { onConflict: 'student_id,attendance_date' })
+  if (error) throw error
+  return data
+}

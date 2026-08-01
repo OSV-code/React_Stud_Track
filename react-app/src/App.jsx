@@ -10,9 +10,25 @@ import {
   adminSearchTeachers,
   adminSetTeacherPassword,
   requestPasswordReset,
-  updateOwnPassword
+  updateOwnPassword,
+  fetchAttendanceByDate,
+  fetchAllAttendance,
+  saveAttendanceRecords
 } from './supabaseClient'
+import {
+  downloadClassPdfReport,
+  downloadClassExcelReport,
+  downloadStudentPdfReport,
+  downloadJsonBackup,
+  shareStudentReportOnWhatsApp
+} from './reportUtils'
 import './App.css'
+
+function getTodayDateString() {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 10)
+}
 
 const initialStudentForm = {
   id: null,
@@ -69,6 +85,17 @@ function App() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedClass, setSelectedClass] = useState('all')
+  const [attendanceDate, setAttendanceDate] = useState(getTodayDateString())
+  const [attendanceClassFilter, setAttendanceClassFilter] = useState('all')
+  const [attendanceIndex, setAttendanceIndex] = useState(0)
+  const [attendanceDraft, setAttendanceDraft] = useState({})
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [attendanceSaving, setAttendanceSaving] = useState(false)
+  const [attendanceError, setAttendanceError] = useState('')
+  const [attendanceNotice, setAttendanceNotice] = useState('')
+  const [allAttendance, setAllAttendance] = useState([])
+  const [reportClassFilter, setReportClassFilter] = useState('all')
+  const [reportsError, setReportsError] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -122,6 +149,22 @@ function App() {
       loadTeachers()
     }
   }, [session, userRole, isAdminRoute])
+
+  useEffect(() => {
+    if (session && accessChecked && students.length > 0) {
+      loadAttendanceForDate(attendanceDate)
+    }
+  }, [session, accessChecked, students, attendanceDate])
+
+  useEffect(() => {
+    setAttendanceIndex(0)
+  }, [attendanceClassFilter, attendanceDate])
+
+  useEffect(() => {
+    if (session && accessChecked && students.length > 0) {
+      loadAllAttendance()
+    }
+  }, [session, accessChecked, students])
 
   async function validateSessionAndLoad() {
     setAccessChecked(false)
@@ -406,13 +449,15 @@ function App() {
 
     try {
       if (form.id) {
-        await updateStudent(form.id, {
-          ...form,
+        const { id, ...studentPayload } = form
+        await updateStudent(id, {
+          ...studentPayload,
           updatedAt: new Date().toISOString()
         })
       } else {
+        const { id, ...studentPayload } = form
         await addStudent({
-          ...form,
+          ...studentPayload,
           createdAt: new Date().toISOString()
         })
       }
@@ -439,10 +484,142 @@ function App() {
     }
   }
 
+  async function loadAttendanceForDate(date) {
+    setAttendanceLoading(true)
+    setAttendanceError('')
+    setAttendanceNotice('')
+
+    try {
+      const records = await fetchAttendanceByDate(date)
+      const recordByStudentId = new Map(records.map((record) => [record.student_id, record.status]))
+
+      const draft = {}
+      students.forEach((student) => {
+        // Empty string means "not marked yet" -- students must be explicitly
+        // marked before they are saved, so an unreviewed student is never
+        // silently written to the database as Present.
+        draft[student.id] = recordByStudentId.get(student.id) || ''
+      })
+      setAttendanceDraft(draft)
+    } catch (err) {
+      setAttendanceError(err.message || 'Unable to load attendance for this date')
+    } finally {
+      setAttendanceLoading(false)
+    }
+  }
+
+  function handleAttendanceStatusChange(studentId, status) {
+    setAttendanceDraft((prev) => ({ ...prev, [studentId]: status }))
+  }
+
+  async function handleSaveAttendance() {
+    setAttendanceSaving(true)
+    setAttendanceError('')
+    setAttendanceNotice('')
+
+    try {
+      const studentsToSave = attendanceStudents.filter((student) => attendanceDraft[student.id])
+
+      if (studentsToSave.length === 0) {
+        setAttendanceError("No changes to save. Mark a student's status first.")
+        return
+      }
+
+      const records = studentsToSave.map((student) => ({
+        student_id: student.id,
+        attendance_date: attendanceDate,
+        status: attendanceDraft[student.id]
+      }))
+
+      await saveAttendanceRecords(records)
+      setAttendanceNotice(`Attendance saved for ${records.length} student(s).`)
+      await loadAllAttendance()
+    } catch (err) {
+      setAttendanceError(err.message || 'Unable to save attendance')
+    } finally {
+      setAttendanceSaving(false)
+    }
+  }
+
+  async function loadAllAttendance() {
+    try {
+      const records = await fetchAllAttendance()
+      setAllAttendance(records)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to load attendance data for reports')
+    }
+  }
+
+  function getReportStudents() {
+    return reportClassFilter === 'all' ? students : students.filter((student) => student.className === reportClassFilter)
+  }
+
+  function handleDownloadClassPdf() {
+    setReportsError('')
+    try {
+      downloadClassPdfReport(getReportStudents(), allAttendance, reportClassFilter)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate PDF report')
+    }
+  }
+
+  function handleDownloadClassExcel() {
+    setReportsError('')
+    try {
+      downloadClassExcelReport(getReportStudents(), allAttendance, reportClassFilter)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate Excel report')
+    }
+  }
+
+  function handleBackupJson() {
+    setReportsError('')
+    try {
+      downloadJsonBackup(students, allAttendance)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate backup')
+    }
+  }
+
+  function handleDownloadStudentReport(student) {
+    setReportsError('')
+    try {
+      downloadStudentPdfReport(student, allAttendance)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate student report')
+    }
+  }
+
+  function handleShareStudentWhatsApp(student) {
+    setReportsError('')
+    try {
+      downloadStudentPdfReport(student, allAttendance)
+      shareStudentReportOnWhatsApp(student)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to share student report')
+    }
+  }
+
   const classes = useMemo(() => {
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
   }, [students])
+
+  const attendanceStudents = useMemo(
+    () =>
+      students.filter(
+        (student) => attendanceClassFilter === 'all' || student.className === attendanceClassFilter
+      ),
+    [students, attendanceClassFilter]
+  )
+
+  const currentAttendanceStudent = attendanceStudents[attendanceIndex] || null
+
+  useEffect(() => {
+    if (attendanceIndex > attendanceStudents.length - 1) {
+      setAttendanceIndex(0)
+    }
+  }, [attendanceStudents, attendanceIndex])
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch = [student.name, student.rollNo, student.className]
@@ -789,8 +966,7 @@ function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Teacher Intelligence</p>
-          <h1>Student management with Supabase</h1>
-          <p className="intro">A modern React dashboard with database-backed student records.</p>
+          <h1>Student management portal</h1>
         </div>
         <div className="header-actions">
           <span className="session-email">{session.user.email}</span>
@@ -984,17 +1160,23 @@ function App() {
               <tbody>
                 {filteredStudents.map((student) => (
                   <tr key={student.id}>
-                    <td>{student.name}</td>
-                    <td>{student.rollNo}</td>
-                    <td>{student.className}</td>
-                    <td>{student.fatherName || student.motherName || '—'}</td>
-                    <td>{student.parentPhone || '—'}</td>
-                    <td className="table-actions">
+                    <td data-label="Name">{student.name}</td>
+                    <td data-label="Roll">{student.rollNo}</td>
+                    <td data-label="Class">{student.className}</td>
+                    <td data-label="Parent">{student.fatherName || student.motherName || '—'}</td>
+                    <td data-label="Phone">{student.parentPhone || '—'}</td>
+                    <td className="table-actions" data-label="Actions">
                       <button className="button tertiary" onClick={() => handleEdit(student)}>
                         Edit
                       </button>
                       <button className="button danger" onClick={() => handleDelete(student.id)}>
                         Delete
+                      </button>
+                      <button className="button tertiary" onClick={() => handleDownloadStudentReport(student)}>
+                        Report
+                      </button>
+                      <button className="button tertiary" onClick={() => handleShareStudentWhatsApp(student)}>
+                        Share WA
                       </button>
                     </td>
                   </tr>
@@ -1009,6 +1191,150 @@ function App() {
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="panel panel-table">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Daily attendance</p>
+              <h2>Attendance</h2>
+            </div>
+            <div className="filter-row">
+              <input
+                type="date"
+                value={attendanceDate}
+                onChange={(e) => setAttendanceDate(e.target.value)}
+              />
+              <select
+                value={attendanceClassFilter}
+                onChange={(e) => {
+                  setAttendanceClassFilter(e.target.value)
+                  setAttendanceNotice('')
+                }}
+              >
+                {classes.map((className) => (
+                  <option key={className} value={className}>
+                    {className === 'all' ? 'All classes' : className}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="button primary"
+                onClick={handleSaveAttendance}
+                disabled={attendanceSaving || attendanceLoading}
+              >
+                {attendanceSaving ? 'Saving...' : 'Save Attendance'}
+              </button>
+            </div>
+          </div>
+
+          {attendanceError && <div className="alert error">{attendanceError}</div>}
+          {attendanceNotice && <div className="alert notice">{attendanceNotice}</div>}
+
+          {attendanceLoading && <p className="empty-state">Loading attendance...</p>}
+
+          {!attendanceLoading && attendanceStudents.length === 0 && (
+            <p className="empty-state">No students found. Adjust the class filter or add a student.</p>
+          )}
+
+          {!attendanceLoading && currentAttendanceStudent && (
+            <div className="attendance-card">
+              <p className="attendance-card-name">{currentAttendanceStudent.name}</p>
+              <p className="attendance-card-meta">
+                Roll No: <strong>{currentAttendanceStudent.rollNo}</strong> &nbsp; Class:{' '}
+                <strong>{currentAttendanceStudent.className}</strong>
+              </p>
+
+              <div className="attendance-status-group">
+                {['Present', 'Absent', 'Late'].map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={`status-button${attendanceDraft[currentAttendanceStudent.id] === status ? ' active' : ''}`}
+                    onClick={() => handleAttendanceStatusChange(currentAttendanceStudent.id, status)}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+
+              <div className="attendance-pagination">
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex(0)}
+                  disabled={attendanceIndex === 0}
+                  aria-label="First student"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex((i) => Math.max(0, i - 1))}
+                  disabled={attendanceIndex === 0}
+                  aria-label="Previous student"
+                >
+                  ‹
+                </button>
+                <span className="pagination-status">
+                  Student {attendanceIndex + 1} of {attendanceStudents.length}
+                </span>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex((i) => Math.min(attendanceStudents.length - 1, i + 1))}
+                  disabled={attendanceIndex >= attendanceStudents.length - 1}
+                  aria-label="Next student"
+                >
+                  ›
+                </button>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex(attendanceStudents.length - 1)}
+                  disabled={attendanceIndex >= attendanceStudents.length - 1}
+                  aria-label="Last student"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="panel panel-table">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Reports & exports</p>
+              <h2>Reports & Exports</h2>
+            </div>
+            <div className="filter-row">
+              <select value={reportClassFilter} onChange={(e) => setReportClassFilter(e.target.value)}>
+                {classes.map((className) => (
+                  <option key={className} value={className}>
+                    {className === 'all' ? 'All classes' : className}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="button primary" onClick={handleDownloadClassPdf}>
+                Download PDF
+              </button>
+              <button type="button" className="button primary" onClick={handleDownloadClassExcel}>
+                Export Excel
+              </button>
+              <button type="button" className="button tertiary" onClick={handleBackupJson}>
+                Backup JSON
+              </button>
+            </div>
+          </div>
+
+          {reportsError && <div className="alert error">{reportsError}</div>}
+          <p className="empty-state">
+            Reports include student details and attendance summary. Marks, homework, behavior, and notes will appear
+            once those modules are added.
+          </p>
         </section>
       </main>
     </div>

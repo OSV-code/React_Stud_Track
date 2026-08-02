@@ -740,8 +740,7 @@ function App() {
   function handleShareStudentWhatsApp(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
-      shareStudentReportOnWhatsApp(student, marksEntries)
+      shareStudentReportOnWhatsApp(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to share student report')
     }
@@ -815,8 +814,13 @@ function App() {
   }
 
   async function handleShareClassworkWhatsApp(entry) {
-    await handleDownloadClasswork(entry)
-    shareClassworkOnWhatsApp(entry)
+    setClassworkError('')
+    try {
+      const photoUrl = classworkPhotoUrls[entry.id] || (entry.photo_path ? await getClassworkPhotoUrl(entry.photo_path) : null)
+      await shareClassworkOnWhatsApp(entry, photoUrl)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to share classwork')
+    }
   }
 
   async function loadMarks() {

@@ -58,6 +58,20 @@ button {
   gap: 16px;
 }
 
+.brand-mark {
+  width: 56px;
+  height: 56px;
+  display: block;
+  margin: 0 0 8px;
+}
+
+.brand-wordmark {
+  width: min(300px, 85%);
+  height: auto;
+  display: block;
+  margin: 0 0 12px;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -526,6 +540,15 @@ tbody tr:hover {
   .panel {
     padding: 20px;
     border-radius: 22px;
+  }
+
+  .brand-mark {
+    width: 48px;
+    height: 48px;
+  }
+
+  .brand-wordmark {
+    width: min(250px, 90%);
   }
 
   .header-actions {

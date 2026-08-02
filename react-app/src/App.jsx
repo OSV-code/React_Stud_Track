@@ -1138,6 +1138,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking session...</h1>
         </section>
@@ -1149,6 +1150,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Set a new password</h1>
           <p className="intro">Enter a new password to complete your account reset.</p>
@@ -1192,6 +1194,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>{isAdminLoginRoute ? 'Admin sign in' : authMode === 'login' ? 'Sign in' : 'Create first account'}</h1>
           <p className="intro">
@@ -1309,6 +1312,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Admin Setup</h1>
           <p className="intro">Search teacher and set/renew PIN from this dedicated page.</p>
@@ -1455,6 +1459,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking access...</h1>
         </section>
@@ -1467,6 +1472,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Classwork</h1>
           </div>
@@ -1617,6 +1623,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Marks / Exam Tracking</h1>
           </div>
@@ -1813,6 +1820,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Notes</h1>
           </div>
@@ -1964,6 +1972,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Behavior Assessment</h1>
           </div>
@@ -2166,6 +2175,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div>
+          <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Student management portal</h1>
         </div>

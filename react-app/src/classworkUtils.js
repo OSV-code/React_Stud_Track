@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf'
+import { openWhatsAppShare } from './whatsappUtils'
 
 function loadImageAsDataUrl(url) {
   return new Promise((resolve, reject) => {
@@ -85,6 +86,5 @@ export function shareClassworkOnWhatsApp(entry) {
     `Please see the attached classwork PDF.\n\n` +
     `- Teacher`
 
-  const encodedMessage = encodeURIComponent(message)
-  window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank', 'noopener,noreferrer')
+  openWhatsAppShare(message)
 }

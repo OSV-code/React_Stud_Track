@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
+import { openWhatsAppShare } from './whatsappUtils'
 
 function attendancePercentFor(studentId, attendanceRecords) {
   const records = attendanceRecords.filter((record) => record.student_id === studentId)
@@ -259,6 +260,5 @@ export function shareStudentReportOnWhatsApp(student, marksRecords = []) {
     `\nPlease see the attached student performance report.\n\n` +
     `- Teacher`
 
-  const encodedMessage = encodeURIComponent(message)
-  window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank', 'noopener,noreferrer')
+  openWhatsAppShare(message)
 }

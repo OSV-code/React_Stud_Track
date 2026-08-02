@@ -10,9 +10,47 @@ import {
   adminSearchTeachers,
   adminSetTeacherPassword,
   requestPasswordReset,
-  updateOwnPassword
+  updateOwnPassword,
+  fetchAttendanceByDate,
+  fetchAllAttendance,
+  saveAttendanceRecords,
+  fetchClassworkEntries,
+  addClasswork,
+  deleteClasswork,
+  getClassworkPhotoUrl,
+  fetchAllMarks,
+  addMark,
+  deleteMark,
+  fetchAllNotes,
+  addNote,
+  deleteNote
 } from './supabaseClient'
+import {
+  downloadClassPdfReport,
+  downloadClassExcelReport,
+  downloadStudentPdfReport,
+  downloadJsonBackup,
+  shareStudentReportOnWhatsApp
+} from './reportUtils'
+import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
 import './App.css'
+
+function getTodayDateString() {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 10)
+}
+
+function marksPercent(score, total) {
+  if (!total) return 0
+  return Math.round((Number(score) / Number(total)) * 100)
+}
+
+function marksTier(percent) {
+  if (percent < 40) return 'low'
+  if (percent < 75) return 'mid'
+  return 'high'
+}
 
 const initialStudentForm = {
   id: null,
@@ -30,9 +68,37 @@ const initialStudentForm = {
   saralPortalNumber: ''
 }
 
+const initialClassworkForm = {
+  classworkDate: getTodayDateString(),
+  className: '',
+  subject: '',
+  notes: '',
+  photoFile: null
+}
+
+const initialMarksForm = {
+  classFilter: 'all',
+  studentId: '',
+  subject: '',
+  examType: 'Unit Test',
+  score: '',
+  totalMarks: '100',
+  examDate: getTodayDateString()
+}
+
+const initialNotesForm = {
+  classFilter: 'all',
+  studentId: '',
+  noteText: '',
+  noteDate: getTodayDateString()
+}
+
 function App() {
   const isAdminRoute = typeof window !== 'undefined' && window.location.pathname === '/admin'
   const isAdminLoginRoute = typeof window !== 'undefined' && window.location.pathname === '/adminlogin'
+  const isClassworkRoute = typeof window !== 'undefined' && window.location.pathname === '/classwork'
+  const isMarksRoute = typeof window !== 'undefined' && window.location.pathname === '/marks'
+  const isNotesRoute = typeof window !== 'undefined' && window.location.pathname === '/notes'
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -69,6 +135,39 @@ function App() {
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedClass, setSelectedClass] = useState('all')
+  const [attendanceDate, setAttendanceDate] = useState(getTodayDateString())
+  const [attendanceClassFilter, setAttendanceClassFilter] = useState('all')
+  const [attendanceIndex, setAttendanceIndex] = useState(0)
+  const [attendanceDraft, setAttendanceDraft] = useState({})
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [attendanceSaving, setAttendanceSaving] = useState(false)
+  const [attendanceError, setAttendanceError] = useState('')
+  const [attendanceNotice, setAttendanceNotice] = useState('')
+  const [allAttendance, setAllAttendance] = useState([])
+  const [reportClassFilter, setReportClassFilter] = useState('all')
+  const [reportsError, setReportsError] = useState('')
+  const [classworkForm, setClassworkForm] = useState(initialClassworkForm)
+  const [classworkEntries, setClassworkEntries] = useState([])
+  const [classworkClassFilter, setClassworkClassFilter] = useState('all')
+  const [classworkPhotoUrls, setClassworkPhotoUrls] = useState({})
+  const [classworkLoading, setClassworkLoading] = useState(false)
+  const [classworkSaving, setClassworkSaving] = useState(false)
+  const [classworkError, setClassworkError] = useState('')
+  const [classworkNotice, setClassworkNotice] = useState('')
+  const [marksForm, setMarksForm] = useState(initialMarksForm)
+  const [marksEntries, setMarksEntries] = useState([])
+  const [marksClassFilter, setMarksClassFilter] = useState('all')
+  const [marksLoading, setMarksLoading] = useState(false)
+  const [marksSaving, setMarksSaving] = useState(false)
+  const [marksError, setMarksError] = useState('')
+  const [marksNotice, setMarksNotice] = useState('')
+  const [notesForm, setNotesForm] = useState(initialNotesForm)
+  const [notesEntries, setNotesEntries] = useState([])
+  const [notesClassFilter, setNotesClassFilter] = useState('all')
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [notesSaving, setNotesSaving] = useState(false)
+  const [notesError, setNotesError] = useState('')
+  const [notesNotice, setNotesNotice] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -122,6 +221,70 @@ function App() {
       loadTeachers()
     }
   }, [session, userRole, isAdminRoute])
+
+  useEffect(() => {
+    if (session && accessChecked && students.length > 0) {
+      loadAttendanceForDate(attendanceDate)
+    }
+  }, [session, accessChecked, students, attendanceDate])
+
+  useEffect(() => {
+    setAttendanceIndex(0)
+  }, [attendanceClassFilter, attendanceDate])
+
+  useEffect(() => {
+    if (session && accessChecked && students.length > 0) {
+      loadAllAttendance()
+    }
+  }, [session, accessChecked, students])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadClasswork()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadMarks()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadNotes()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function loadPhotoUrls() {
+      const entries = classworkEntries.filter((entry) => entry.photo_path && !classworkPhotoUrls[entry.id])
+      if (entries.length === 0) return
+
+      const results = await Promise.all(
+        entries.map(async (entry) => {
+          try {
+            const url = await getClassworkPhotoUrl(entry.photo_path)
+            return [entry.id, url]
+          } catch {
+            return [entry.id, null]
+          }
+        })
+      )
+
+      if (!isCancelled) {
+        setClassworkPhotoUrls((prev) => ({ ...prev, ...Object.fromEntries(results) }))
+      }
+    }
+
+    loadPhotoUrls()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [classworkEntries])
 
   async function validateSessionAndLoad() {
     setAccessChecked(false)
@@ -406,13 +569,15 @@ function App() {
 
     try {
       if (form.id) {
-        await updateStudent(form.id, {
-          ...form,
+        const { id, ...studentPayload } = form
+        await updateStudent(id, {
+          ...studentPayload,
           updatedAt: new Date().toISOString()
         })
       } else {
+        const { id, ...studentPayload } = form
         await addStudent({
-          ...form,
+          ...studentPayload,
           createdAt: new Date().toISOString()
         })
       }
@@ -439,10 +604,407 @@ function App() {
     }
   }
 
+  async function loadAttendanceForDate(date) {
+    setAttendanceLoading(true)
+    setAttendanceError('')
+    setAttendanceNotice('')
+
+    try {
+      const records = await fetchAttendanceByDate(date)
+      const recordByStudentId = new Map(records.map((record) => [record.student_id, record.status]))
+
+      const draft = {}
+      students.forEach((student) => {
+        // Empty string means "not marked yet" -- students must be explicitly
+        // marked before they are saved, so an unreviewed student is never
+        // silently written to the database as Present.
+        draft[student.id] = recordByStudentId.get(student.id) || ''
+      })
+      setAttendanceDraft(draft)
+    } catch (err) {
+      setAttendanceError(err.message || 'Unable to load attendance for this date')
+    } finally {
+      setAttendanceLoading(false)
+    }
+  }
+
+  function handleAttendanceStatusChange(studentId, status) {
+    setAttendanceDraft((prev) => ({ ...prev, [studentId]: status }))
+  }
+
+  async function handleSaveAttendance() {
+    setAttendanceSaving(true)
+    setAttendanceError('')
+    setAttendanceNotice('')
+
+    try {
+      const studentsToSave = attendanceStudents.filter((student) => attendanceDraft[student.id])
+
+      if (studentsToSave.length === 0) {
+        setAttendanceError("No changes to save. Mark a student's status first.")
+        return
+      }
+
+      const records = studentsToSave.map((student) => ({
+        student_id: student.id,
+        attendance_date: attendanceDate,
+        status: attendanceDraft[student.id]
+      }))
+
+      await saveAttendanceRecords(records)
+      setAttendanceNotice(`Attendance saved for ${records.length} student(s).`)
+      await loadAllAttendance()
+    } catch (err) {
+      setAttendanceError(err.message || 'Unable to save attendance')
+    } finally {
+      setAttendanceSaving(false)
+    }
+  }
+
+  async function loadAllAttendance() {
+    try {
+      const records = await fetchAllAttendance()
+      setAllAttendance(records)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to load attendance data for reports')
+    }
+  }
+
+  function getReportStudents() {
+    return reportClassFilter === 'all' ? students : students.filter((student) => student.className === reportClassFilter)
+  }
+
+  function handleDownloadClassPdf() {
+    setReportsError('')
+    try {
+      downloadClassPdfReport(getReportStudents(), allAttendance, reportClassFilter)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate PDF report')
+    }
+  }
+
+  function handleDownloadClassExcel() {
+    setReportsError('')
+    try {
+      downloadClassExcelReport(getReportStudents(), allAttendance, reportClassFilter)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate Excel report')
+    }
+  }
+
+  function handleBackupJson() {
+    setReportsError('')
+    try {
+      downloadJsonBackup(students, allAttendance)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate backup')
+    }
+  }
+
+  function handleDownloadStudentReport(student) {
+    setReportsError('')
+    try {
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to generate student report')
+    }
+  }
+
+  function handleShareStudentWhatsApp(student) {
+    setReportsError('')
+    try {
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
+      shareStudentReportOnWhatsApp(student, marksEntries)
+    } catch (err) {
+      setReportsError(err.message || 'Unable to share student report')
+    }
+  }
+
+  async function loadClasswork() {
+    setClassworkLoading(true)
+    setClassworkError('')
+
+    try {
+      const entries = await fetchClassworkEntries()
+      setClassworkEntries(entries)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to load classwork entries')
+    } finally {
+      setClassworkLoading(false)
+    }
+  }
+
+  function handleClassworkFieldChange(field, value) {
+    setClassworkForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveClasswork(e) {
+    e.preventDefault()
+    setClassworkError('')
+    setClassworkNotice('')
+
+    if (!classworkForm.classworkDate) {
+      setClassworkError('Please select a date.')
+      return
+    }
+    if (!classworkForm.className) {
+      setClassworkError('Please select a class.')
+      return
+    }
+
+    setClassworkSaving(true)
+
+    try {
+      await addClasswork(classworkForm)
+      setClassworkForm(initialClassworkForm)
+      setClassworkNotice('Classwork saved successfully.')
+      await loadClasswork()
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to save classwork')
+    } finally {
+      setClassworkSaving(false)
+    }
+  }
+
+  async function handleDeleteClasswork(entry) {
+    if (!window.confirm('Delete this classwork entry permanently?')) return
+
+    try {
+      await deleteClasswork(entry)
+      await loadClasswork()
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to delete classwork entry')
+    }
+  }
+
+  async function handleDownloadClasswork(entry) {
+    setClassworkError('')
+    try {
+      const photoUrl = classworkPhotoUrls[entry.id] || (entry.photo_path ? await getClassworkPhotoUrl(entry.photo_path) : null)
+      await downloadClassworkPdf(entry, photoUrl)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to generate classwork PDF')
+    }
+  }
+
+  async function handleShareClassworkWhatsApp(entry) {
+    await handleDownloadClasswork(entry)
+    shareClassworkOnWhatsApp(entry)
+  }
+
+  async function loadMarks() {
+    setMarksLoading(true)
+    setMarksError('')
+
+    try {
+      const entries = await fetchAllMarks()
+      setMarksEntries(entries)
+    } catch (err) {
+      setMarksError(err.message || 'Unable to load marks')
+    } finally {
+      setMarksLoading(false)
+    }
+  }
+
+  function handleMarksFieldChange(field, value) {
+    setMarksForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveMarks(e) {
+    e.preventDefault()
+    setMarksError('')
+    setMarksNotice('')
+
+    if (!marksForm.studentId) {
+      setMarksError('Please select a student.')
+      return
+    }
+    if (!marksForm.subject.trim()) {
+      setMarksError('Please enter a subject.')
+      return
+    }
+    if (marksForm.score === '' || marksForm.totalMarks === '') {
+      setMarksError('Please enter score and total marks.')
+      return
+    }
+
+    setMarksSaving(true)
+
+    try {
+      await addMark({
+        studentId: marksForm.studentId,
+        subject: marksForm.subject.trim(),
+        examType: marksForm.examType,
+        score: Number(marksForm.score),
+        totalMarks: Number(marksForm.totalMarks),
+        examDate: marksForm.examDate
+      })
+      setMarksForm((prev) => ({ ...initialMarksForm, classFilter: prev.classFilter, studentId: prev.studentId }))
+      setMarksNotice('Marks saved successfully.')
+      await loadMarks()
+    } catch (err) {
+      setMarksError(err.message || 'Unable to save marks')
+    } finally {
+      setMarksSaving(false)
+    }
+  }
+
+  async function handleDeleteMark(entry) {
+    if (!window.confirm('Delete this marks entry permanently?')) return
+
+    try {
+      await deleteMark(entry.id)
+      await loadMarks()
+    } catch (err) {
+      setMarksError(err.message || 'Unable to delete marks entry')
+    }
+  }
+
+  async function loadNotes() {
+    setNotesLoading(true)
+    setNotesError('')
+
+    try {
+      const entries = await fetchAllNotes()
+      setNotesEntries(entries)
+    } catch (err) {
+      setNotesError(err.message || 'Unable to load notes')
+    } finally {
+      setNotesLoading(false)
+    }
+  }
+
+  function handleNotesFieldChange(field, value) {
+    setNotesForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveNote(e) {
+    e.preventDefault()
+    setNotesError('')
+    setNotesNotice('')
+
+    if (!notesForm.studentId) {
+      setNotesError('Please select a student.')
+      return
+    }
+    if (!notesForm.noteText.trim()) {
+      setNotesError('Please enter a note.')
+      return
+    }
+
+    setNotesSaving(true)
+
+    try {
+      await addNote({
+        studentId: notesForm.studentId,
+        noteText: notesForm.noteText.trim(),
+        noteDate: notesForm.noteDate
+      })
+      setNotesForm((prev) => ({ ...initialNotesForm, classFilter: prev.classFilter, studentId: prev.studentId }))
+      setNotesNotice('Note saved successfully.')
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err.message || 'Unable to save note')
+    } finally {
+      setNotesSaving(false)
+    }
+  }
+
+  async function handleDeleteNote(entry) {
+    if (!window.confirm('Delete this note permanently?')) return
+
+    try {
+      await deleteNote(entry.id)
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err.message || 'Unable to delete note')
+    }
+  }
+
   const classes = useMemo(() => {
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
   }, [students])
+
+  const attendanceStudents = useMemo(
+    () =>
+      students.filter(
+        (student) => attendanceClassFilter === 'all' || student.className === attendanceClassFilter
+      ),
+    [students, attendanceClassFilter]
+  )
+
+  const currentAttendanceStudent = attendanceStudents[attendanceIndex] || null
+
+  useEffect(() => {
+    if (attendanceIndex > attendanceStudents.length - 1) {
+      setAttendanceIndex(0)
+    }
+  }, [attendanceStudents, attendanceIndex])
+
+  const filteredClassworkEntries = useMemo(
+    () =>
+      classworkClassFilter === 'all'
+        ? classworkEntries
+        : classworkEntries.filter((entry) => entry.className === classworkClassFilter),
+    [classworkEntries, classworkClassFilter]
+  )
+
+  const studentsById = useMemo(() => {
+    const map = new Map()
+    students.forEach((student) => map.set(student.id, student))
+    return map
+  }, [students])
+
+  const marksFormStudents = useMemo(
+    () =>
+      marksForm.classFilter === 'all'
+        ? students
+        : students.filter((student) => student.className === marksForm.classFilter),
+    [students, marksForm.classFilter]
+  )
+
+  const marksEntriesWithStudent = useMemo(
+    () =>
+      marksEntries.map((entry) => ({
+        ...entry,
+        student: studentsById.get(entry.student_id) || null
+      })),
+    [marksEntries, studentsById]
+  )
+
+  const filteredMarksEntries = useMemo(
+    () =>
+      marksClassFilter === 'all'
+        ? marksEntriesWithStudent
+        : marksEntriesWithStudent.filter((entry) => entry.student?.className === marksClassFilter),
+    [marksEntriesWithStudent, marksClassFilter]
+  )
+
+  const notesFormStudents = useMemo(
+    () =>
+      notesForm.classFilter === 'all'
+        ? students
+        : students.filter((student) => student.className === notesForm.classFilter),
+    [students, notesForm.classFilter]
+  )
+
+  const notesEntriesWithStudent = useMemo(
+    () =>
+      notesEntries.map((entry) => ({
+        ...entry,
+        student: studentsById.get(entry.student_id) || null
+      })),
+    [notesEntries, studentsById]
+  )
+
+  const filteredNotesEntries = useMemo(
+    () =>
+      notesClassFilter === 'all'
+        ? notesEntriesWithStudent
+        : notesEntriesWithStudent.filter((entry) => entry.student?.className === notesClassFilter),
+    [notesEntriesWithStudent, notesClassFilter]
+  )
 
   const filteredStudents = students.filter((student) => {
     const matchesSearch = [student.name, student.rollNo, student.className]
@@ -784,16 +1346,521 @@ function App() {
     )
   }
 
+  if (isClassworkRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Classwork</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Classwork</p>
+                <h2>Add classwork entry</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveClasswork}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="classworkDate">Date</label>
+                  <input
+                    id="classworkDate"
+                    type="date"
+                    value={classworkForm.classworkDate}
+                    onChange={(e) => handleClassworkFieldChange('classworkDate', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkClassName">Class</label>
+                  <input
+                    id="classworkClassName"
+                    value={classworkForm.className}
+                    onChange={(e) => handleClassworkFieldChange('className', e.target.value)}
+                    placeholder="e.g. 8A"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkSubject">Subject</label>
+                  <input
+                    id="classworkSubject"
+                    value={classworkForm.subject}
+                    onChange={(e) => handleClassworkFieldChange('subject', e.target.value)}
+                    placeholder="e.g. Mathematics"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="classworkPhoto">Photo (optional)</label>
+                  <input
+                    id="classworkPhoto"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleClassworkFieldChange('photoFile', e.target.files?.[0] || null)}
+                  />
+                </div>
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="classworkNotes">Notes / Instructions</label>
+                <textarea
+                  id="classworkNotes"
+                  rows={3}
+                  value={classworkForm.notes}
+                  onChange={(e) => handleClassworkFieldChange('notes', e.target.value)}
+                  placeholder="Optional notes for students or parents"
+                />
+              </div>
+
+              {classworkError && <div className="alert error">{classworkError}</div>}
+              {classworkNotice && <div className="alert notice">{classworkNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={classworkSaving}>
+                  {classworkSaving ? 'Saving...' : 'Save Classwork'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Classwork gallery</p>
+                <h2>Classwork history</h2>
+              </div>
+              <div className="filter-row">
+                <select value={classworkClassFilter} onChange={(e) => setClassworkClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {classworkLoading && <p className="empty-state">Loading classwork...</p>}
+
+            {!classworkLoading && filteredClassworkEntries.length === 0 && (
+              <p className="empty-state">No classwork entries yet. Add one above.</p>
+            )}
+
+            {!classworkLoading && filteredClassworkEntries.length > 0 && (
+              <div className="classwork-gallery">
+                {filteredClassworkEntries.map((entry) => (
+                  <div className="classwork-card" key={entry.id}>
+                    {classworkPhotoUrls[entry.id] && (
+                      <img
+                        className="classwork-photo"
+                        src={classworkPhotoUrls[entry.id]}
+                        alt={entry.subject || 'Classwork'}
+                      />
+                    )}
+                    <p className="classwork-subject">{entry.subject || 'No Subject'}</p>
+                    <p className="classwork-meta">
+                      📅 {entry.classwork_date} | 📚 Class: {entry.className}
+                    </p>
+                    {entry.notes && <p className="classwork-notes">&quot;{entry.notes}&quot;</p>}
+                    <div className="classwork-actions">
+                      <button className="button tertiary" onClick={() => handleDownloadClasswork(entry)}>
+                        Download PDF
+                      </button>
+                      <button className="button tertiary" onClick={() => handleShareClassworkWhatsApp(entry)}>
+                        Share WA
+                      </button>
+                      <button className="button danger" onClick={() => handleDeleteClasswork(entry)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
+  if (isMarksRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Marks / Exam Tracking</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Marks</p>
+                <h2>Add exam marks</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveMarks}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="marksClassFilterInput">Class</label>
+                  <select
+                    id="marksClassFilterInput"
+                    value={marksForm.classFilter}
+                    onChange={(e) => handleMarksFieldChange('classFilter', e.target.value)}
+                  >
+                    {classes.map((className) => (
+                      <option key={className} value={className}>
+                        {className === 'all' ? 'All classes' : className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksStudentId">Student</label>
+                  <select
+                    id="marksStudentId"
+                    value={marksForm.studentId}
+                    onChange={(e) => handleMarksFieldChange('studentId', e.target.value)}
+                  >
+                    <option value="">Select student</option>
+                    {marksFormStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksSubject">Subject</label>
+                  <input
+                    id="marksSubject"
+                    value={marksForm.subject}
+                    onChange={(e) => handleMarksFieldChange('subject', e.target.value)}
+                    placeholder="e.g. Mathematics"
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksExamType">Exam Type</label>
+                  <select
+                    id="marksExamType"
+                    value={marksForm.examType}
+                    onChange={(e) => handleMarksFieldChange('examType', e.target.value)}
+                  >
+                    <option value="Unit Test">Unit Test</option>
+                    <option value="Mid Term">Mid Term</option>
+                    <option value="Final Exam">Final Exam</option>
+                    <option value="Assignment">Assignment</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksScore">Score</label>
+                  <input
+                    id="marksScore"
+                    type="number"
+                    min="0"
+                    value={marksForm.score}
+                    onChange={(e) => handleMarksFieldChange('score', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksTotalMarks">Total Marks</label>
+                  <input
+                    id="marksTotalMarks"
+                    type="number"
+                    min="1"
+                    value={marksForm.totalMarks}
+                    onChange={(e) => handleMarksFieldChange('totalMarks', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="marksExamDate">Exam Date</label>
+                  <input
+                    id="marksExamDate"
+                    type="date"
+                    value={marksForm.examDate}
+                    onChange={(e) => handleMarksFieldChange('examDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {marksError && <div className="alert error">{marksError}</div>}
+              {marksNotice && <div className="alert notice">{marksNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={marksSaving}>
+                  {marksSaving ? 'Saving...' : 'Save Marks'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Exam history</p>
+                <h2>Marks records</h2>
+              </div>
+              <div className="filter-row">
+                <select value={marksClassFilter} onChange={(e) => setMarksClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {marksLoading && <p className="empty-state">Loading marks...</p>}
+
+            {!marksLoading && filteredMarksEntries.length === 0 && (
+              <p className="empty-state">No marks recorded yet. Add one above.</p>
+            )}
+
+            {!marksLoading && filteredMarksEntries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Class</th>
+                      <th>Subject</th>
+                      <th>Exam Type</th>
+                      <th>Score</th>
+                      <th>Percent</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMarksEntries.map((entry) => {
+                      const percent = marksPercent(entry.score, entry.total_marks)
+                      return (
+                        <tr key={entry.id}>
+                          <td data-label="Student">{entry.student?.name || 'Unknown'}</td>
+                          <td data-label="Class">{entry.student?.className || '—'}</td>
+                          <td data-label="Subject">{entry.subject}</td>
+                          <td data-label="Exam Type">{entry.exam_type}</td>
+                          <td data-label="Score">
+                            {entry.score} / {entry.total_marks}
+                          </td>
+                          <td data-label="Percent">
+                            <span className={`marks-badge ${marksTier(percent)}`}>{percent}%</span>
+                          </td>
+                          <td data-label="Date">{entry.exam_date}</td>
+                          <td className="table-actions" data-label="Actions">
+                            <button className="button danger" onClick={() => handleDeleteMark(entry)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
+  if (isNotesRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Notes</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Notes</p>
+                <h2>Add teacher note</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveNote}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="notesClassFilterInput">Class</label>
+                  <select
+                    id="notesClassFilterInput"
+                    value={notesForm.classFilter}
+                    onChange={(e) => handleNotesFieldChange('classFilter', e.target.value)}
+                  >
+                    {classes.map((className) => (
+                      <option key={className} value={className}>
+                        {className === 'all' ? 'All classes' : className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="notesStudentId">Student</label>
+                  <select
+                    id="notesStudentId"
+                    value={notesForm.studentId}
+                    onChange={(e) => handleNotesFieldChange('studentId', e.target.value)}
+                  >
+                    <option value="">Select student</option>
+                    {notesFormStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="notesDate">Date</label>
+                  <input
+                    id="notesDate"
+                    type="date"
+                    value={notesForm.noteDate}
+                    onChange={(e) => handleNotesFieldChange('noteDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="notesText">Note</label>
+                <textarea
+                  id="notesText"
+                  rows={3}
+                  value={notesForm.noteText}
+                  onChange={(e) => handleNotesFieldChange('noteText', e.target.value)}
+                  placeholder="Observations, remarks, or reminders about this student"
+                />
+              </div>
+
+              {notesError && <div className="alert error">{notesError}</div>}
+              {notesNotice && <div className="alert notice">{notesNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={notesSaving}>
+                  {notesSaving ? 'Saving...' : 'Save Note'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Note history</p>
+                <h2>Teacher notes</h2>
+              </div>
+              <div className="filter-row">
+                <select value={notesClassFilter} onChange={(e) => setNotesClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {notesLoading && <p className="empty-state">Loading notes...</p>}
+
+            {!notesLoading && filteredNotesEntries.length === 0 && (
+              <p className="empty-state">No notes recorded yet. Add one above.</p>
+            )}
+
+            {!notesLoading && filteredNotesEntries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Class</th>
+                      <th>Note</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredNotesEntries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td data-label="Student">{entry.student?.name || 'Unknown'}</td>
+                        <td data-label="Class">{entry.student?.className || '—'}</td>
+                        <td data-label="Note">{entry.note_text}</td>
+                        <td data-label="Date">{entry.note_date}</td>
+                        <td className="table-actions" data-label="Actions">
+                          <button className="button danger" onClick={() => handleDeleteNote(entry)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
         <div>
           <p className="eyebrow">Teacher Intelligence</p>
-          <h1>Student management with Supabase</h1>
-          <p className="intro">A modern React dashboard with database-backed student records.</p>
+          <h1>Student management portal</h1>
         </div>
         <div className="header-actions">
           <span className="session-email">{session.user.email}</span>
+          <a href="/classwork" className="button tertiary" role="button">
+            Classwork
+          </a>
+          <a href="/marks" className="button tertiary" role="button">
+            Marks
+          </a>
+          <a href="/notes" className="button tertiary" role="button">
+            Notes
+          </a>
           {userRole === 'admin' && (
             <a href="/admin" className="button tertiary" role="button">
               Admin Setup
@@ -984,17 +2051,23 @@ function App() {
               <tbody>
                 {filteredStudents.map((student) => (
                   <tr key={student.id}>
-                    <td>{student.name}</td>
-                    <td>{student.rollNo}</td>
-                    <td>{student.className}</td>
-                    <td>{student.fatherName || student.motherName || '—'}</td>
-                    <td>{student.parentPhone || '—'}</td>
-                    <td className="table-actions">
+                    <td data-label="Name">{student.name}</td>
+                    <td data-label="Roll">{student.rollNo}</td>
+                    <td data-label="Class">{student.className}</td>
+                    <td data-label="Parent">{student.fatherName || student.motherName || '—'}</td>
+                    <td data-label="Phone">{student.parentPhone || '—'}</td>
+                    <td className="table-actions" data-label="Actions">
                       <button className="button tertiary" onClick={() => handleEdit(student)}>
                         Edit
                       </button>
                       <button className="button danger" onClick={() => handleDelete(student.id)}>
                         Delete
+                      </button>
+                      <button className="button tertiary" onClick={() => handleDownloadStudentReport(student)}>
+                        Report
+                      </button>
+                      <button className="button tertiary" onClick={() => handleShareStudentWhatsApp(student)}>
+                        Share WA
                       </button>
                     </td>
                   </tr>
@@ -1009,6 +2082,150 @@ function App() {
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="panel panel-table">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Daily attendance</p>
+              <h2>Attendance</h2>
+            </div>
+            <div className="filter-row">
+              <input
+                type="date"
+                value={attendanceDate}
+                onChange={(e) => setAttendanceDate(e.target.value)}
+              />
+              <select
+                value={attendanceClassFilter}
+                onChange={(e) => {
+                  setAttendanceClassFilter(e.target.value)
+                  setAttendanceNotice('')
+                }}
+              >
+                {classes.map((className) => (
+                  <option key={className} value={className}>
+                    {className === 'all' ? 'All classes' : className}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="button primary"
+                onClick={handleSaveAttendance}
+                disabled={attendanceSaving || attendanceLoading}
+              >
+                {attendanceSaving ? 'Saving...' : 'Save Attendance'}
+              </button>
+            </div>
+          </div>
+
+          {attendanceError && <div className="alert error">{attendanceError}</div>}
+          {attendanceNotice && <div className="alert notice">{attendanceNotice}</div>}
+
+          {attendanceLoading && <p className="empty-state">Loading attendance...</p>}
+
+          {!attendanceLoading && attendanceStudents.length === 0 && (
+            <p className="empty-state">No students found. Adjust the class filter or add a student.</p>
+          )}
+
+          {!attendanceLoading && currentAttendanceStudent && (
+            <div className="attendance-card">
+              <p className="attendance-card-name">{currentAttendanceStudent.name}</p>
+              <p className="attendance-card-meta">
+                Roll No: <strong>{currentAttendanceStudent.rollNo}</strong> &nbsp; Class:{' '}
+                <strong>{currentAttendanceStudent.className}</strong>
+              </p>
+
+              <div className="attendance-status-group">
+                {['Present', 'Absent', 'Late'].map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={`status-button${attendanceDraft[currentAttendanceStudent.id] === status ? ' active' : ''}`}
+                    onClick={() => handleAttendanceStatusChange(currentAttendanceStudent.id, status)}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+
+              <div className="attendance-pagination">
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex(0)}
+                  disabled={attendanceIndex === 0}
+                  aria-label="First student"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex((i) => Math.max(0, i - 1))}
+                  disabled={attendanceIndex === 0}
+                  aria-label="Previous student"
+                >
+                  ‹
+                </button>
+                <span className="pagination-status">
+                  Student {attendanceIndex + 1} of {attendanceStudents.length}
+                </span>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex((i) => Math.min(attendanceStudents.length - 1, i + 1))}
+                  disabled={attendanceIndex >= attendanceStudents.length - 1}
+                  aria-label="Next student"
+                >
+                  ›
+                </button>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  onClick={() => setAttendanceIndex(attendanceStudents.length - 1)}
+                  disabled={attendanceIndex >= attendanceStudents.length - 1}
+                  aria-label="Last student"
+                >
+                  »
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="panel panel-table">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Reports & exports</p>
+              <h2>Reports & Exports</h2>
+            </div>
+            <div className="filter-row">
+              <select value={reportClassFilter} onChange={(e) => setReportClassFilter(e.target.value)}>
+                {classes.map((className) => (
+                  <option key={className} value={className}>
+                    {className === 'all' ? 'All classes' : className}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="button primary" onClick={handleDownloadClassPdf}>
+                Download PDF
+              </button>
+              <button type="button" className="button primary" onClick={handleDownloadClassExcel}>
+                Export Excel
+              </button>
+              <button type="button" className="button tertiary" onClick={handleBackupJson}>
+                Backup JSON
+              </button>
+            </div>
+          </div>
+
+          {reportsError && <div className="alert error">{reportsError}</div>}
+          <p className="empty-state">
+            Reports include student details and attendance summary. Marks, homework, behavior, and notes will appear
+            once those modules are added.
+          </p>
         </section>
       </main>
     </div>

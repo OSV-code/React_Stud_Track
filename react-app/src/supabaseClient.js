@@ -175,6 +175,29 @@ export async function deleteMark(id) {
   if (error) throw error
 }
 
+export async function fetchAllNotes() {
+  const { data, error } = await supabase.from('notes').select('*').order('note_date', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function addNote({ studentId, noteText, noteDate }) {
+  const { data, error } = await supabase.from('notes').insert([
+    {
+      student_id: studentId,
+      note_text: noteText,
+      note_date: noteDate
+    }
+  ])
+  if (error) throw error
+  return data
+}
+
+export async function deleteNote(id) {
+  const { error } = await supabase.from('notes').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function getClassworkPhotoUrl(photoPath) {
   if (!photoPath) return null
   const { data, error } = await supabase.storage.from(CLASSWORK_BUCKET).createSignedUrl(photoPath, 60 * 60)

@@ -113,7 +113,7 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = []) {
+export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = []) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
@@ -202,7 +202,22 @@ export function downloadStudentPdfReport(student, attendanceRecords, marksRecord
   doc.text('Teacher Notes', 20, y)
   y += 8
   doc.setFontSize(12)
-  doc.text('No notes recorded yet.', 20, y)
+
+  const studentNotes = notesRecords.filter((note) => note.student_id === student.id)
+
+  if (studentNotes.length === 0) {
+    doc.text('No notes recorded yet.', 20, y)
+  } else {
+    studentNotes.forEach((note) => {
+      checkPage()
+      const lines = doc.splitTextToSize(`${note.note_date}: ${note.note_text}`, 170)
+      lines.forEach((line) => {
+        checkPage()
+        doc.text(line, 20, y)
+        y += 7
+      })
+    })
+  }
 
   doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`)
 }

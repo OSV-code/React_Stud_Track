@@ -20,7 +20,10 @@ import {
   getClassworkPhotoUrl,
   fetchAllMarks,
   addMark,
-  deleteMark
+  deleteMark,
+  fetchAllNotes,
+  addNote,
+  deleteNote
 } from './supabaseClient'
 import {
   downloadClassPdfReport,
@@ -83,11 +86,19 @@ const initialMarksForm = {
   examDate: getTodayDateString()
 }
 
+const initialNotesForm = {
+  classFilter: 'all',
+  studentId: '',
+  noteText: '',
+  noteDate: getTodayDateString()
+}
+
 function App() {
   const isAdminRoute = typeof window !== 'undefined' && window.location.pathname === '/admin'
   const isAdminLoginRoute = typeof window !== 'undefined' && window.location.pathname === '/adminlogin'
   const isClassworkRoute = typeof window !== 'undefined' && window.location.pathname === '/classwork'
   const isMarksRoute = typeof window !== 'undefined' && window.location.pathname === '/marks'
+  const isNotesRoute = typeof window !== 'undefined' && window.location.pathname === '/notes'
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -150,6 +161,13 @@ function App() {
   const [marksSaving, setMarksSaving] = useState(false)
   const [marksError, setMarksError] = useState('')
   const [marksNotice, setMarksNotice] = useState('')
+  const [notesForm, setNotesForm] = useState(initialNotesForm)
+  const [notesEntries, setNotesEntries] = useState([])
+  const [notesClassFilter, setNotesClassFilter] = useState('all')
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [notesSaving, setNotesSaving] = useState(false)
+  const [notesError, setNotesError] = useState('')
+  const [notesNotice, setNotesNotice] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -229,6 +247,12 @@ function App() {
   useEffect(() => {
     if (session && accessChecked) {
       loadMarks()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadNotes()
     }
   }, [session, accessChecked])
 
@@ -680,7 +704,7 @@ function App() {
   function handleDownloadStudentReport(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries)
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to generate student report')
     }
@@ -689,7 +713,7 @@ function App() {
   function handleShareStudentWhatsApp(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries)
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
       shareStudentReportOnWhatsApp(student, marksEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to share student report')
@@ -836,6 +860,67 @@ function App() {
     }
   }
 
+  async function loadNotes() {
+    setNotesLoading(true)
+    setNotesError('')
+
+    try {
+      const entries = await fetchAllNotes()
+      setNotesEntries(entries)
+    } catch (err) {
+      setNotesError(err.message || 'Unable to load notes')
+    } finally {
+      setNotesLoading(false)
+    }
+  }
+
+  function handleNotesFieldChange(field, value) {
+    setNotesForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveNote(e) {
+    e.preventDefault()
+    setNotesError('')
+    setNotesNotice('')
+
+    if (!notesForm.studentId) {
+      setNotesError('Please select a student.')
+      return
+    }
+    if (!notesForm.noteText.trim()) {
+      setNotesError('Please enter a note.')
+      return
+    }
+
+    setNotesSaving(true)
+
+    try {
+      await addNote({
+        studentId: notesForm.studentId,
+        noteText: notesForm.noteText.trim(),
+        noteDate: notesForm.noteDate
+      })
+      setNotesForm((prev) => ({ ...initialNotesForm, classFilter: prev.classFilter, studentId: prev.studentId }))
+      setNotesNotice('Note saved successfully.')
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err.message || 'Unable to save note')
+    } finally {
+      setNotesSaving(false)
+    }
+  }
+
+  async function handleDeleteNote(entry) {
+    if (!window.confirm('Delete this note permanently?')) return
+
+    try {
+      await deleteNote(entry.id)
+      await loadNotes()
+    } catch (err) {
+      setNotesError(err.message || 'Unable to delete note')
+    }
+  }
+
   const classes = useMemo(() => {
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
@@ -894,6 +979,31 @@ function App() {
         ? marksEntriesWithStudent
         : marksEntriesWithStudent.filter((entry) => entry.student?.className === marksClassFilter),
     [marksEntriesWithStudent, marksClassFilter]
+  )
+
+  const notesFormStudents = useMemo(
+    () =>
+      notesForm.classFilter === 'all'
+        ? students
+        : students.filter((student) => student.className === notesForm.classFilter),
+    [students, notesForm.classFilter]
+  )
+
+  const notesEntriesWithStudent = useMemo(
+    () =>
+      notesEntries.map((entry) => ({
+        ...entry,
+        student: studentsById.get(entry.student_id) || null
+      })),
+    [notesEntries, studentsById]
+  )
+
+  const filteredNotesEntries = useMemo(
+    () =>
+      notesClassFilter === 'all'
+        ? notesEntriesWithStudent
+        : notesEntriesWithStudent.filter((entry) => entry.student?.className === notesClassFilter),
+    [notesEntriesWithStudent, notesClassFilter]
   )
 
   const filteredStudents = students.filter((student) => {
@@ -1582,6 +1692,157 @@ function App() {
     )
   }
 
+  if (isNotesRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Notes</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Notes</p>
+                <h2>Add teacher note</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveNote}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="notesClassFilterInput">Class</label>
+                  <select
+                    id="notesClassFilterInput"
+                    value={notesForm.classFilter}
+                    onChange={(e) => handleNotesFieldChange('classFilter', e.target.value)}
+                  >
+                    {classes.map((className) => (
+                      <option key={className} value={className}>
+                        {className === 'all' ? 'All classes' : className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="notesStudentId">Student</label>
+                  <select
+                    id="notesStudentId"
+                    value={notesForm.studentId}
+                    onChange={(e) => handleNotesFieldChange('studentId', e.target.value)}
+                  >
+                    <option value="">Select student</option>
+                    {notesFormStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="notesDate">Date</label>
+                  <input
+                    id="notesDate"
+                    type="date"
+                    value={notesForm.noteDate}
+                    onChange={(e) => handleNotesFieldChange('noteDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="notesText">Note</label>
+                <textarea
+                  id="notesText"
+                  rows={3}
+                  value={notesForm.noteText}
+                  onChange={(e) => handleNotesFieldChange('noteText', e.target.value)}
+                  placeholder="Observations, remarks, or reminders about this student"
+                />
+              </div>
+
+              {notesError && <div className="alert error">{notesError}</div>}
+              {notesNotice && <div className="alert notice">{notesNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={notesSaving}>
+                  {notesSaving ? 'Saving...' : 'Save Note'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Note history</p>
+                <h2>Teacher notes</h2>
+              </div>
+              <div className="filter-row">
+                <select value={notesClassFilter} onChange={(e) => setNotesClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {notesLoading && <p className="empty-state">Loading notes...</p>}
+
+            {!notesLoading && filteredNotesEntries.length === 0 && (
+              <p className="empty-state">No notes recorded yet. Add one above.</p>
+            )}
+
+            {!notesLoading && filteredNotesEntries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Class</th>
+                      <th>Note</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredNotesEntries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td data-label="Student">{entry.student?.name || 'Unknown'}</td>
+                        <td data-label="Class">{entry.student?.className || '—'}</td>
+                        <td data-label="Note">{entry.note_text}</td>
+                        <td data-label="Date">{entry.note_date}</td>
+                        <td className="table-actions" data-label="Actions">
+                          <button className="button danger" onClick={() => handleDeleteNote(entry)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -1596,6 +1857,9 @@ function App() {
           </a>
           <a href="/marks" className="button tertiary" role="button">
             Marks
+          </a>
+          <a href="/notes" className="button tertiary" role="button">
+            Notes
           </a>
           {userRole === 'admin' && (
             <a href="/admin" className="button tertiary" role="button">

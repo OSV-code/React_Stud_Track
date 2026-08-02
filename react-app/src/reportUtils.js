@@ -113,7 +113,7 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = []) {
+export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
@@ -186,16 +186,27 @@ export function downloadStudentPdfReport(student, attendanceRecords, marksRecord
   doc.text('Behavioral Assessment', 20, y)
   y += 8
   doc.setFontSize(12)
-  doc.text('No behavior records yet.', 20, y)
-  y += 10
 
-  checkPage()
-  doc.setFontSize(14)
-  doc.text('Daily Homework Details', 20, y)
-  y += 8
-  doc.setFontSize(12)
-  doc.text('No homework records yet.', 20, y)
-  y += 10
+  const studentBehavior = behaviorRecords.filter((entry) => entry.student_id === student.id)
+
+  if (studentBehavior.length === 0) {
+    doc.text('No behavior records yet.', 20, y)
+    y += 10
+  } else {
+    studentBehavior.forEach((entry) => {
+      checkPage()
+      const lines = doc.splitTextToSize(
+        `${entry.assessment_date} - Discipline: ${entry.discipline}/5, Confidence: ${entry.confidence}/5, Communication: ${entry.communication}/5, Leadership: ${entry.leadership}/5`,
+        170
+      )
+      lines.forEach((line) => {
+        checkPage()
+        doc.text(line, 20, y)
+        y += 7
+      })
+    })
+    y += 3
+  }
 
   checkPage()
   doc.setFontSize(14)

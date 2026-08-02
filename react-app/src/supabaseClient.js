@@ -198,6 +198,35 @@ export async function deleteNote(id) {
   if (error) throw error
 }
 
+export async function fetchAllBehavior() {
+  const { data, error } = await supabase
+    .from('behavior_assessments')
+    .select('*')
+    .order('assessment_date', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+export async function addBehavior({ studentId, discipline, confidence, communication, leadership, assessmentDate }) {
+  const { data, error } = await supabase.from('behavior_assessments').insert([
+    {
+      student_id: studentId,
+      discipline,
+      confidence,
+      communication,
+      leadership,
+      assessment_date: assessmentDate
+    }
+  ])
+  if (error) throw error
+  return data
+}
+
+export async function deleteBehavior(id) {
+  const { error } = await supabase.from('behavior_assessments').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function getClassworkPhotoUrl(photoPath) {
   if (!photoPath) return null
   const { data, error } = await supabase.storage.from(CLASSWORK_BUCKET).createSignedUrl(photoPath, 60 * 60)

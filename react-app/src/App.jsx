@@ -23,7 +23,10 @@ import {
   deleteMark,
   fetchAllNotes,
   addNote,
-  deleteNote
+  deleteNote,
+  fetchAllBehavior,
+  addBehavior,
+  deleteBehavior
 } from './supabaseClient'
 import {
   downloadClassPdfReport,
@@ -93,12 +96,23 @@ const initialNotesForm = {
   noteDate: getTodayDateString()
 }
 
+const initialBehaviorForm = {
+  classFilter: 'all',
+  studentId: '',
+  discipline: '3',
+  confidence: '3',
+  communication: '3',
+  leadership: '3',
+  assessmentDate: getTodayDateString()
+}
+
 function App() {
   const isAdminRoute = typeof window !== 'undefined' && window.location.pathname === '/admin'
   const isAdminLoginRoute = typeof window !== 'undefined' && window.location.pathname === '/adminlogin'
   const isClassworkRoute = typeof window !== 'undefined' && window.location.pathname === '/classwork'
   const isMarksRoute = typeof window !== 'undefined' && window.location.pathname === '/marks'
   const isNotesRoute = typeof window !== 'undefined' && window.location.pathname === '/notes'
+  const isBehaviorRoute = typeof window !== 'undefined' && window.location.pathname === '/behavior'
   const [session, setSession] = useState(null)
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -168,6 +182,13 @@ function App() {
   const [notesSaving, setNotesSaving] = useState(false)
   const [notesError, setNotesError] = useState('')
   const [notesNotice, setNotesNotice] = useState('')
+  const [behaviorForm, setBehaviorForm] = useState(initialBehaviorForm)
+  const [behaviorEntries, setBehaviorEntries] = useState([])
+  const [behaviorClassFilter, setBehaviorClassFilter] = useState('all')
+  const [behaviorLoading, setBehaviorLoading] = useState(false)
+  const [behaviorSaving, setBehaviorSaving] = useState(false)
+  const [behaviorError, setBehaviorError] = useState('')
+  const [behaviorNotice, setBehaviorNotice] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -253,6 +274,12 @@ function App() {
   useEffect(() => {
     if (session && accessChecked) {
       loadNotes()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadBehavior()
     }
   }, [session, accessChecked])
 
@@ -704,7 +731,7 @@ function App() {
   function handleDownloadStudentReport(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to generate student report')
     }
@@ -713,8 +740,7 @@ function App() {
   function handleShareStudentWhatsApp(student) {
     setReportsError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries)
-      shareStudentReportOnWhatsApp(student, marksEntries)
+      shareStudentReportOnWhatsApp(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
     } catch (err) {
       setReportsError(err.message || 'Unable to share student report')
     }
@@ -788,8 +814,13 @@ function App() {
   }
 
   async function handleShareClassworkWhatsApp(entry) {
-    await handleDownloadClasswork(entry)
-    shareClassworkOnWhatsApp(entry)
+    setClassworkError('')
+    try {
+      const photoUrl = classworkPhotoUrls[entry.id] || (entry.photo_path ? await getClassworkPhotoUrl(entry.photo_path) : null)
+      await shareClassworkOnWhatsApp(entry, photoUrl)
+    } catch (err) {
+      setClassworkError(err.message || 'Unable to share classwork')
+    }
   }
 
   async function loadMarks() {
@@ -921,6 +952,66 @@ function App() {
     }
   }
 
+  async function loadBehavior() {
+    setBehaviorLoading(true)
+    setBehaviorError('')
+
+    try {
+      const entries = await fetchAllBehavior()
+      setBehaviorEntries(entries)
+    } catch (err) {
+      setBehaviorError(err.message || 'Unable to load behavior assessments')
+    } finally {
+      setBehaviorLoading(false)
+    }
+  }
+
+  function handleBehaviorFieldChange(field, value) {
+    setBehaviorForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveBehavior(e) {
+    e.preventDefault()
+    setBehaviorError('')
+    setBehaviorNotice('')
+
+    if (!behaviorForm.studentId) {
+      setBehaviorError('Please select a student.')
+      return
+    }
+
+    setBehaviorSaving(true)
+
+    try {
+      await addBehavior({
+        studentId: behaviorForm.studentId,
+        discipline: Number(behaviorForm.discipline),
+        confidence: Number(behaviorForm.confidence),
+        communication: Number(behaviorForm.communication),
+        leadership: Number(behaviorForm.leadership),
+        assessmentDate: behaviorForm.assessmentDate
+      })
+      setBehaviorForm((prev) => ({ ...initialBehaviorForm, classFilter: prev.classFilter, studentId: prev.studentId }))
+      setBehaviorNotice('Behavior assessment saved successfully.')
+      await loadBehavior()
+    } catch (err) {
+      setBehaviorError(err.message || 'Unable to save behavior assessment')
+    } finally {
+      setBehaviorSaving(false)
+    }
+  }
+
+  async function handleDeleteBehavior(entry) {
+    if (!window.confirm('Delete this behavior assessment permanently?')) return
+
+    try {
+      await deleteBehavior(entry.id)
+      await loadBehavior()
+    } catch (err) {
+      setBehaviorError(err.message || 'Unable to delete behavior assessment')
+    }
+  }
+
   const classes = useMemo(() => {
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
@@ -1004,6 +1095,31 @@ function App() {
         ? notesEntriesWithStudent
         : notesEntriesWithStudent.filter((entry) => entry.student?.className === notesClassFilter),
     [notesEntriesWithStudent, notesClassFilter]
+  )
+
+  const behaviorFormStudents = useMemo(
+    () =>
+      behaviorForm.classFilter === 'all'
+        ? students
+        : students.filter((student) => student.className === behaviorForm.classFilter),
+    [students, behaviorForm.classFilter]
+  )
+
+  const behaviorEntriesWithStudent = useMemo(
+    () =>
+      behaviorEntries.map((entry) => ({
+        ...entry,
+        student: studentsById.get(entry.student_id) || null
+      })),
+    [behaviorEntries, studentsById]
+  )
+
+  const filteredBehaviorEntries = useMemo(
+    () =>
+      behaviorClassFilter === 'all'
+        ? behaviorEntriesWithStudent
+        : behaviorEntriesWithStudent.filter((entry) => entry.student?.className === behaviorClassFilter),
+    [behaviorEntriesWithStudent, behaviorClassFilter]
   )
 
   const filteredStudents = students.filter((student) => {
@@ -1843,6 +1959,209 @@ function App() {
     )
   }
 
+  if (isBehaviorRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Behavior Assessment</h1>
+          </div>
+          <div className="header-actions">
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel panel-form">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Behavior</p>
+                <h2>Add behavior assessment</h2>
+              </div>
+            </div>
+
+            <form className="student-form" onSubmit={handleSaveBehavior}>
+              <div className="field-grid">
+                <div className="field-group">
+                  <label htmlFor="behaviorClassFilterInput">Class</label>
+                  <select
+                    id="behaviorClassFilterInput"
+                    value={behaviorForm.classFilter}
+                    onChange={(e) => handleBehaviorFieldChange('classFilter', e.target.value)}
+                  >
+                    {classes.map((className) => (
+                      <option key={className} value={className}>
+                        {className === 'all' ? 'All classes' : className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorStudentId">Student</label>
+                  <select
+                    id="behaviorStudentId"
+                    value={behaviorForm.studentId}
+                    onChange={(e) => handleBehaviorFieldChange('studentId', e.target.value)}
+                  >
+                    <option value="">Select student</option>
+                    {behaviorFormStudents.map((student) => (
+                      <option key={student.id} value={student.id}>
+                        {student.name} ({student.className})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorDiscipline">Discipline (1-5)</label>
+                  <input
+                    id="behaviorDiscipline"
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={behaviorForm.discipline}
+                    onChange={(e) => handleBehaviorFieldChange('discipline', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorConfidence">Confidence (1-5)</label>
+                  <input
+                    id="behaviorConfidence"
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={behaviorForm.confidence}
+                    onChange={(e) => handleBehaviorFieldChange('confidence', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorCommunication">Communication (1-5)</label>
+                  <input
+                    id="behaviorCommunication"
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={behaviorForm.communication}
+                    onChange={(e) => handleBehaviorFieldChange('communication', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorLeadership">Leadership (1-5)</label>
+                  <input
+                    id="behaviorLeadership"
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={behaviorForm.leadership}
+                    onChange={(e) => handleBehaviorFieldChange('leadership', e.target.value)}
+                  />
+                </div>
+                <div className="field-group">
+                  <label htmlFor="behaviorDate">Date</label>
+                  <input
+                    id="behaviorDate"
+                    type="date"
+                    value={behaviorForm.assessmentDate}
+                    onChange={(e) => handleBehaviorFieldChange('assessmentDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {behaviorError && <div className="alert error">{behaviorError}</div>}
+              {behaviorNotice && <div className="alert notice">{behaviorNotice}</div>}
+
+              <div className="form-actions">
+                <button type="submit" className="button primary" disabled={behaviorSaving}>
+                  {behaviorSaving ? 'Saving...' : 'Save Assessment'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Assessment history</p>
+                <h2>Behavior records</h2>
+              </div>
+              <div className="filter-row">
+                <select value={behaviorClassFilter} onChange={(e) => setBehaviorClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {behaviorLoading && <p className="empty-state">Loading behavior assessments...</p>}
+
+            {!behaviorLoading && filteredBehaviorEntries.length === 0 && (
+              <p className="empty-state">No behavior assessments recorded yet. Add one above.</p>
+            )}
+
+            {!behaviorLoading && filteredBehaviorEntries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Class</th>
+                      <th>Discipline</th>
+                      <th>Confidence</th>
+                      <th>Communication</th>
+                      <th>Leadership</th>
+                      <th>Average</th>
+                      <th>Date</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredBehaviorEntries.map((entry) => {
+                      const average =
+                        (Number(entry.discipline) +
+                          Number(entry.confidence) +
+                          Number(entry.communication) +
+                          Number(entry.leadership)) /
+                        4
+                      const percent = Math.round((average / 5) * 100)
+                      return (
+                        <tr key={entry.id}>
+                          <td data-label="Student">{entry.student?.name || 'Unknown'}</td>
+                          <td data-label="Class">{entry.student?.className || '—'}</td>
+                          <td data-label="Discipline">{entry.discipline}/5</td>
+                          <td data-label="Confidence">{entry.confidence}/5</td>
+                          <td data-label="Communication">{entry.communication}/5</td>
+                          <td data-label="Leadership">{entry.leadership}/5</td>
+                          <td data-label="Average">
+                            <span className={`marks-badge ${marksTier(percent)}`}>{average.toFixed(1)}/5</span>
+                          </td>
+                          <td data-label="Date">{entry.assessment_date}</td>
+                          <td className="table-actions" data-label="Actions">
+                            <button className="button danger" onClick={() => handleDeleteBehavior(entry)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -1860,6 +2179,9 @@ function App() {
           </a>
           <a href="/notes" className="button tertiary" role="button">
             Notes
+          </a>
+          <a href="/behavior" className="button tertiary" role="button">
+            Behavior
           </a>
           {userRole === 'admin' && (
             <a href="/admin" className="button tertiary" role="button">

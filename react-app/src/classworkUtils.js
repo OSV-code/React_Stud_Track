@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf'
+import { openWhatsAppShare } from './whatsappUtils'
 
 function loadImageAsDataUrl(url) {
   return new Promise((resolve, reject) => {
@@ -17,7 +18,7 @@ function loadImageAsDataUrl(url) {
   })
 }
 
-export async function downloadClassworkPdf(entry, photoUrl) {
+async function buildClassworkDoc(entry, photoUrl) {
   const doc = new jsPDF('p', 'mm', 'a4')
 
   doc.setFontSize(16)
@@ -72,10 +73,15 @@ export async function downloadClassworkPdf(entry, photoUrl) {
     }
   }
 
+  return doc
+}
+
+export async function downloadClassworkPdf(entry, photoUrl) {
+  const doc = await buildClassworkDoc(entry, photoUrl)
   doc.save(`Classwork_${entry.className}_${entry.classwork_date}.pdf`)
 }
 
-export function shareClassworkOnWhatsApp(entry) {
+export async function shareClassworkOnWhatsApp(entry, photoUrl) {
   const message =
     `📚 *Classwork Assignment*\n\n` +
     `Subject: ${entry.subject || 'No Subject'}\n` +
@@ -85,6 +91,21 @@ export function shareClassworkOnWhatsApp(entry) {
     `Please see the attached classwork PDF.\n\n` +
     `- Teacher`
 
-  const encodedMessage = encodeURIComponent(message)
-  window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank', 'noopener,noreferrer')
+  const doc = await buildClassworkDoc(entry, photoUrl)
+  const fileName = `Classwork_${entry.className}_${entry.classwork_date}.pdf`
+  const pdfFile = new File([doc.output('blob')], fileName, { type: 'application/pdf' })
+
+  if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+    try {
+      await navigator.share({ files: [pdfFile], text: message, title: 'Classwork Assignment' })
+      return
+    } catch (err) {
+      if (err && err.name === 'AbortError') return
+    }
+  }
+
+  // Fallback for browsers that can't attach files to a share sheet (older iOS Safari, desktop, etc.)
+  doc.save(fileName)
+  openWhatsAppShare(message)
+  window.alert('The PDF has been downloaded. Please attach it manually in WhatsApp before sending.')
 }

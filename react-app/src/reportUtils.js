@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
+import { openWhatsAppShare } from './whatsappUtils'
 
 function attendancePercentFor(studentId, attendanceRecords) {
   const records = attendanceRecords.filter((record) => record.student_id === studentId)
@@ -113,7 +114,7 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = []) {
+function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
@@ -186,16 +187,27 @@ export function downloadStudentPdfReport(student, attendanceRecords, marksRecord
   doc.text('Behavioral Assessment', 20, y)
   y += 8
   doc.setFontSize(12)
-  doc.text('No behavior records yet.', 20, y)
-  y += 10
 
-  checkPage()
-  doc.setFontSize(14)
-  doc.text('Daily Homework Details', 20, y)
-  y += 8
-  doc.setFontSize(12)
-  doc.text('No homework records yet.', 20, y)
-  y += 10
+  const studentBehavior = behaviorRecords.filter((entry) => entry.student_id === student.id)
+
+  if (studentBehavior.length === 0) {
+    doc.text('No behavior records yet.', 20, y)
+    y += 10
+  } else {
+    studentBehavior.forEach((entry) => {
+      checkPage()
+      const lines = doc.splitTextToSize(
+        `${entry.assessment_date} - Discipline: ${entry.discipline}/5, Confidence: ${entry.confidence}/5, Communication: ${entry.communication}/5, Leadership: ${entry.leadership}/5`,
+        170
+      )
+      lines.forEach((line) => {
+        checkPage()
+        doc.text(line, 20, y)
+        y += 7
+      })
+    })
+    y += 3
+  }
 
   checkPage()
   doc.setFontSize(14)
@@ -219,6 +231,11 @@ export function downloadStudentPdfReport(student, attendanceRecords, marksRecord
     })
   }
 
+  return doc
+}
+
+export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
+  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords)
   doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`)
 }
 
@@ -233,7 +250,7 @@ export function downloadJsonBackup(students, attendanceRecords) {
   URL.revokeObjectURL(url)
 }
 
-export function shareStudentReportOnWhatsApp(student, marksRecords = []) {
+export async function shareStudentReportOnWhatsApp(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
   const marksStats = marksStatsFor(student.id, marksRecords)
   const marksLine = marksStats.records.length > 0 ? `Average Marks: ${marksStats.average}%\n` : ''
 
@@ -248,6 +265,21 @@ export function shareStudentReportOnWhatsApp(student, marksRecords = []) {
     `\nPlease see the attached student performance report.\n\n` +
     `- Teacher`
 
-  const encodedMessage = encodeURIComponent(message)
-  window.open(`https://web.whatsapp.com/send?text=${encodedMessage}`, '_blank', 'noopener,noreferrer')
+  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords)
+  const fileName = `${student.name.replace(/\s+/g, '_')}_Report.pdf`
+  const pdfFile = new File([doc.output('blob')], fileName, { type: 'application/pdf' })
+
+  if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+    try {
+      await navigator.share({ files: [pdfFile], text: message, title: 'Student Performance Report' })
+      return
+    } catch (err) {
+      if (err && err.name === 'AbortError') return
+    }
+  }
+
+  // Fallback for browsers that can't attach files to a share sheet (older iOS Safari, desktop, etc.)
+  doc.save(fileName)
+  openWhatsAppShare(message)
+  window.alert('The PDF has been downloaded. Please attach it manually in WhatsApp before sending.')
 }

@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
+import { supabase } from './supabaseClient'
 import { openWhatsAppShare } from './whatsappUtils'
 
 function attendancePercentFor(studentId, attendanceRecords) {
@@ -24,6 +25,33 @@ function marksStatsFor(studentId, marksRecords) {
   const totalPercent = records.reduce((sum, record) => sum + (record.score / record.total_marks) * 100, 0)
   const average = records.length > 0 ? Math.round(totalPercent / records.length) : 0
   return { records, average }
+}
+
+function parseDateString(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+function getDateRangeArray(startDate, endDate) {
+  const dates = []
+  let current = parseDateString(startDate)
+  const end = parseDateString(endDate)
+  while (current <= end) {
+    dates.push(current.toISOString().slice(0, 10))
+    current.setUTCDate(current.getUTCDate() + 1)
+  }
+  return dates
+}
+
+function formatDateLabel(dateStr) {
+  const date = parseDateString(dateStr)
+  return new Intl.DateTimeFormat('en-IN', { weekday: 'short', timeZone: 'UTC' }).format(date)
+}
+
+const STATUS_CODE = {
+  Present: 'P',
+  Absent: 'Ab',
+  Late: 'L'
 }
 
 export function downloadClassPdfReport(students, attendanceRecords, classFilter) {
@@ -282,4 +310,151 @@ export async function shareStudentReportOnWhatsApp(student, attendanceRecords, m
   doc.save(fileName)
   openWhatsAppShare(message)
   window.alert('The PDF has been downloaded. Please attach it manually in WhatsApp before sending.')
+}
+
+// ---- Added: Student attendance statement for a custom date range ----
+// Produces a "bank statement" style record: one row per day in the range,
+// with a P / Ab / L code (or '-' if unmarked), plus student details header
+// and a summary block at the end.
+
+export function downloadStudentAttendanceRangeExcel(student, attendanceRecords, startDate, endDate) {
+  if (!startDate || !endDate) {
+    throw new Error('Please select both From and To dates.')
+  }
+  if (startDate > endDate) {
+    throw new Error('From date must be before To date.')
+  }
+
+  const dateList = getDateRangeArray(startDate, endDate)
+  const studentRecords = attendanceRecords.filter((record) => record.student_id === student.id)
+  const recordByDate = new Map(studentRecords.map((record) => [record.attendance_date, record.status]))
+
+  const headerRows = [
+    ['Student Attendance Statement'],
+    [],
+    ['Name', student.name],
+    ['Roll No', student.rollNo],
+    ['Class', student.className],
+    ['Father Name', student.fatherName || 'N/A'],
+    ['Mother Name', student.motherName || 'N/A'],
+    ['Phone', student.parentPhone || 'N/A'],
+    ['Admission No', student.admissionNo || 'N/A'],
+    ['Period', `${startDate} to ${endDate}`],
+    []
+  ]
+
+  const tableHeader = ['Date', 'Day', 'Status']
+  let present = 0
+  let absent = 0
+  let late = 0
+  let marked = 0
+
+  const tableRows = dateList.map((dateStr) => {
+    const status = recordByDate.get(dateStr)
+    if (status) {
+      marked += 1
+      if (status === 'Present') present += 1
+      else if (status === 'Absent') absent += 1
+      else if (status === 'Late') late += 1
+    }
+    const code = status ? (STATUS_CODE[status] || status) : '-'
+    return [dateStr, formatDateLabel(dateStr), code]
+  })
+
+  const percent = marked > 0 ? Math.round(((present + late) / marked) * 100) : 0
+
+  const summaryRows = [
+    [],
+    ['Summary'],
+    ['Total Days in Range', dateList.length],
+    ['Days Marked', marked],
+    ['Present', present],
+    ['Absent', absent],
+    ['Late', late],
+    ['Attendance %', `${percent}%`]
+  ]
+
+  const sheetData = [...headerRows, tableHeader, ...tableRows, ...summaryRows]
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData)
+  worksheet['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 10 }]
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance')
+
+  const safeName = student.name.replace(/\s+/g, '_')
+  XLSX.writeFile(workbook, `${safeName}_Attendance_${startDate}_to_${endDate}.xlsx`)
+}
+
+export function downloadStudentAttendanceRangePdf(student, attendanceRecords, startDate, endDate) {
+  if (!startDate || !endDate) {
+    throw new Error('Please select both From and To dates.')
+  }
+  if (startDate > endDate) {
+    throw new Error('From date must be before To date.')
+  }
+
+  const dateList = getDateRangeArray(startDate, endDate)
+  const studentRecords = attendanceRecords.filter((record) => record.student_id === student.id)
+  const recordByDate = new Map(studentRecords.map((record) => [record.attendance_date, record.status]))
+
+  const doc = new jsPDF('p', 'mm', 'a4')
+  doc.setFontSize(16)
+  doc.text('Student Attendance Statement', 14, 15)
+
+  doc.setFontSize(11)
+  let y = 25
+  doc.text(`Name: ${student.name}   Roll No: ${student.rollNo}   Class: ${student.className}`, 14, y)
+  y += 6
+  doc.text(`Father: ${student.fatherName || 'N/A'}   Phone: ${student.parentPhone || 'N/A'}`, 14, y)
+  y += 6
+  doc.text(`Period: ${startDate} to ${endDate}`, 14, y)
+  y += 10
+
+  doc.setFontSize(10)
+  doc.text('Date', 14, y)
+  doc.text('Day', 60, y)
+  doc.text('Status', 100, y)
+  y += 4
+  doc.line(14, y, 140, y)
+  y += 6
+
+  let present = 0
+  let absent = 0
+  let late = 0
+  let marked = 0
+
+  dateList.forEach((dateStr) => {
+    if (y > 280) {
+      doc.addPage()
+      y = 15
+    }
+    const status = recordByDate.get(dateStr)
+    if (status) {
+      marked += 1
+      if (status === 'Present') present += 1
+      else if (status === 'Absent') absent += 1
+      else if (status === 'Late') late += 1
+    }
+    const code = status ? (STATUS_CODE[status] || status) : '-'
+    doc.text(dateStr, 14, y)
+    doc.text(formatDateLabel(dateStr), 60, y)
+    doc.text(code, 100, y)
+    y += 6
+  })
+
+  const percent = marked > 0 ? Math.round(((present + late) / marked) * 100) : 0
+  y += 6
+  if (y > 270) {
+    doc.addPage()
+    y = 15
+  }
+  doc.setFontSize(11)
+  doc.text(
+    `Total: ${dateList.length} | Marked: ${marked} | Present: ${present} | Absent: ${absent} | Late: ${late} | Attendance: ${percent}%`,
+    14,
+    y
+  )
+
+  const safeName = student.name.replace(/\s+/g, '_')
+  doc.save(`${safeName}_Attendance_${startDate}_to_${endDate}.pdf`)
 }

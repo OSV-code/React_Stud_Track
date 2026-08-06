@@ -33,7 +33,9 @@ import {
   downloadClassExcelReport,
   downloadStudentPdfReport,
   downloadJsonBackup,
-  shareStudentReportOnWhatsApp
+  shareStudentReportOnWhatsApp,
+  downloadStudentAttendanceRangeExcel,
+  downloadStudentAttendanceRangePdf
 } from './reportUtils'
 import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
 import './App.css'
@@ -189,6 +191,11 @@ function App() {
   const [behaviorSaving, setBehaviorSaving] = useState(false)
   const [behaviorError, setBehaviorError] = useState('')
   const [behaviorNotice, setBehaviorNotice] = useState('')
+
+  const [attendanceReportStudent, setAttendanceReportStudent] = useState(null)
+  const [attendanceReportStartDate, setAttendanceReportStartDate] = useState('')
+  const [attendanceReportEndDate, setAttendanceReportEndDate] = useState('')
+  const [attendanceReportError, setAttendanceReportError] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -746,6 +753,47 @@ function App() {
     }
   }
 
+  function handleOpenAttendanceReportModal(student) {
+    setAttendanceReportStudent(student)
+    setAttendanceReportError('')
+    const today = getTodayDateString()
+    setAttendanceReportStartDate(today)
+    setAttendanceReportEndDate(today)
+  }
+
+  function handleCloseAttendanceReportModal() {
+    setAttendanceReportStudent(null)
+    setAttendanceReportError('')
+  }
+
+  function handleDownloadAttendanceRangeExcel() {
+    setAttendanceReportError('')
+    try {
+      downloadStudentAttendanceRangeExcel(
+        attendanceReportStudent,
+        allAttendance,
+        attendanceReportStartDate,
+        attendanceReportEndDate
+      )
+    } catch (err) {
+      setAttendanceReportError(err.message || 'Unable to generate attendance Excel')
+    }
+  }
+
+  function handleDownloadAttendanceRangePdf() {
+    setAttendanceReportError('')
+    try {
+      downloadStudentAttendanceRangePdf(
+        attendanceReportStudent,
+        allAttendance,
+        attendanceReportStartDate,
+        attendanceReportEndDate
+      )
+    } catch (err) {
+      setAttendanceReportError(err.message || 'Unable to generate attendance PDF')
+    }
+  }
+
   async function loadClasswork() {
     setClassworkLoading(true)
     setClassworkError('')
@@ -1131,6 +1179,8 @@ function App() {
     return matchesSearch && matchesClass
   })
 
+  const shouldShowStudentRecords = search.trim().length > 0 || selectedClass !== 'all'
+
   const isStudentsTableMissing =
     typeof error === 'string' && error.toLowerCase().includes("could not find the table 'public.students'")
 
@@ -1138,6 +1188,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking session...</h1>
         </section>
@@ -1149,6 +1200,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Set a new password</h1>
           <p className="intro">Enter a new password to complete your account reset.</p>
@@ -1192,6 +1244,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>{isAdminLoginRoute ? 'Admin sign in' : authMode === 'login' ? 'Sign in' : 'Create first account'}</h1>
           <p className="intro">
@@ -1309,6 +1362,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Admin Setup</h1>
           <p className="intro">Search teacher and set/renew PIN from this dedicated page.</p>
@@ -1455,6 +1509,7 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking access...</h1>
         </section>
@@ -1467,6 +1522,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Classwork</h1>
           </div>
@@ -1617,6 +1673,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Marks / Exam Tracking</h1>
           </div>
@@ -1813,6 +1870,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Notes</h1>
           </div>
@@ -1964,6 +2022,7 @@ function App() {
       <div className="app-shell">
         <header className="app-header">
           <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
             <p className="eyebrow">Teacher Intelligence</p>
             <h1>Behavior Assessment</h1>
           </div>
@@ -2166,6 +2225,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div>
+          <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Student management portal</h1>
         </div>
@@ -2341,6 +2401,7 @@ function App() {
             <div>
               <p className="eyebrow">Student roster</p>
               <h2>Student records</h2>
+              <p className="intro">Open a student to export a date-range attendance statement as Excel or PDF with daily P, Ab, and L codes.</p>
             </div>
             <div className="filter-row">
               <input
@@ -2358,52 +2419,59 @@ function App() {
             </div>
           </div>
 
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Roll</th>
-                  <th>Class</th>
-                  <th>Parent</th>
-                  <th>Phone</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredStudents.map((student) => (
-                  <tr key={student.id}>
-                    <td data-label="Name">{student.name}</td>
-                    <td data-label="Roll">{student.rollNo}</td>
-                    <td data-label="Class">{student.className}</td>
-                    <td data-label="Parent">{student.fatherName || student.motherName || '—'}</td>
-                    <td data-label="Phone">{student.parentPhone || '—'}</td>
-                    <td className="table-actions" data-label="Actions">
-                      <button className="button tertiary" onClick={() => handleEdit(student)}>
-                        Edit
-                      </button>
-                      <button className="button danger" onClick={() => handleDelete(student.id)}>
-                        Delete
-                      </button>
-                      <button className="button tertiary" onClick={() => handleDownloadStudentReport(student)}>
-                        Report
-                      </button>
-                      <button className="button tertiary" onClick={() => handleShareStudentWhatsApp(student)}>
-                        Share WA
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredStudents.length === 0 && (
+          {shouldShowStudentRecords ? (
+            <div className="table-wrapper">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan="6" className="empty-state">
-                      No students found. Adjust your filters or add a student.
-                    </td>
+                    <th>Name</th>
+                    <th>Roll</th>
+                    <th>Class</th>
+                    <th>Parent</th>
+                    <th>Phone</th>
+                    <th>Actions</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredStudents.map((student) => (
+                    <tr key={student.id}>
+                      <td data-label="Name">{student.name}</td>
+                      <td data-label="Roll">{student.rollNo}</td>
+                      <td data-label="Class">{student.className}</td>
+                      <td data-label="Parent">{student.fatherName || student.motherName || '—'}</td>
+                      <td data-label="Phone">{student.parentPhone || '—'}</td>
+                      <td className="table-actions" data-label="Actions">
+                        <button className="button tertiary" onClick={() => handleEdit(student)}>
+                          Edit
+                        </button>
+                        <button className="button danger" onClick={() => handleDelete(student.id)}>
+                          Delete
+                        </button>
+                        <button className="button tertiary" onClick={() => handleDownloadStudentReport(student)}>
+                          Report
+                        </button>
+                        <button className="button warning" onClick={() => handleOpenAttendanceReportModal(student)}>
+                          Attendance Statement
+                        </button>
+                        <button className="button tertiary" onClick={() => handleShareStudentWhatsApp(student)}>
+                          Share WA
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredStudents.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="empty-state">
+                        No students found. Adjust your filters or add a student.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-state">Search a student name/roll or choose a class to view records.</p>
+          )}
         </section>
 
         <section className="panel panel-table">
@@ -2550,6 +2618,58 @@ function App() {
           </p>
         </section>
       </main>
+
+      {/* ---- Added: per-student attendance date-range statement modal ---- */}
+      {attendanceReportStudent && (
+        <div className="modal-overlay" onClick={handleCloseAttendanceReportModal}>
+          <div className="panel modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Attendance statement</p>
+                <h2>{attendanceReportStudent.name}</h2>
+              </div>
+              <button type="button" className="button tertiary" onClick={handleCloseAttendanceReportModal}>
+                Close
+              </button>
+            </div>
+
+            <p className="intro">
+              Roll No: {attendanceReportStudent.rollNo} | Class: {attendanceReportStudent.className}. Select a
+              from/to date range to export the daily attendance statement.
+            </p>
+
+            <div className="field-grid">
+              <div className="field-group">
+                <label>From Date</label>
+                <input
+                  type="date"
+                  value={attendanceReportStartDate}
+                  onChange={(e) => setAttendanceReportStartDate(e.target.value)}
+                />
+              </div>
+              <div className="field-group">
+                <label>To Date</label>
+                <input
+                  type="date"
+                  value={attendanceReportEndDate}
+                  onChange={(e) => setAttendanceReportEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {attendanceReportError && <div className="alert error">{attendanceReportError}</div>}
+
+            <div className="form-actions">
+              <button type="button" className="button primary" onClick={handleDownloadAttendanceRangeExcel}>
+                Download Excel
+              </button>
+              <button type="button" className="button secondary" onClick={handleDownloadAttendanceRangePdf}>
+                Download PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

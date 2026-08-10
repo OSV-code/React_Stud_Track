@@ -91,6 +91,8 @@ const initialMarksForm = {
   examDate: getTodayDateString()
 }
 
+const EXAM_TYPE_OPTIONS = ['Unit Test', 'Mid Term', 'Final Exam', 'Assignment', 'Other']
+
 const initialNotesForm = {
   classFilter: 'all',
   studentId: '',
@@ -116,6 +118,11 @@ function App() {
   const isNotesRoute = typeof window !== 'undefined' && window.location.pathname === '/notes'
   const isBehaviorRoute = typeof window !== 'undefined' && window.location.pathname === '/behavior'
   const [session, setSession] = useState(null)
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === 'undefined') return 'dark'
+    const storedTheme = window.localStorage.getItem('stud-tracker-theme')
+    return storedTheme === 'light' ? 'light' : 'dark'
+  })
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
   const [authSubmitting, setAuthSubmitting] = useState(false)
@@ -196,6 +203,18 @@ function App() {
   const [attendanceReportStartDate, setAttendanceReportStartDate] = useState('')
   const [attendanceReportEndDate, setAttendanceReportEndDate] = useState('')
   const [attendanceReportError, setAttendanceReportError] = useState('')
+  const [studentReportStudent, setStudentReportStudent] = useState(null)
+  const [studentReportExamTypes, setStudentReportExamTypes] = useState(EXAM_TYPE_OPTIONS)
+  const [studentReportError, setStudentReportError] = useState('')
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme)
+    }
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('stud-tracker-theme', theme)
+    }
+  }, [theme])
 
   useEffect(() => {
     let isMounted = true
@@ -601,17 +620,37 @@ function App() {
       return
     }
 
+    const normalizedRollNo = form.rollNo.trim().toLowerCase()
+    const normalizedClassName = form.className.trim().toLowerCase()
+    const duplicateStudent = students.find((student) => {
+      if (student.id === form.id) return false
+      const studentRollNo = String(student.rollNo || '').trim().toLowerCase()
+      const studentClassName = String(student.className || '').trim().toLowerCase()
+      return studentRollNo === normalizedRollNo && studentClassName === normalizedClassName
+    })
+
+    if (duplicateStudent) {
+      setError(`Roll Number ${form.rollNo.trim()} is already assigned in Class ${form.className.trim()}.`)
+      return
+    }
+
     try {
+      const { id, ...studentPayload } = form
+      const sanitizedStudentPayload = {
+        ...studentPayload,
+        name: studentPayload.name.trim(),
+        rollNo: studentPayload.rollNo.trim(),
+        className: studentPayload.className.trim()
+      }
+
       if (form.id) {
-        const { id, ...studentPayload } = form
         await updateStudent(id, {
-          ...studentPayload,
+          ...sanitizedStudentPayload,
           updatedAt: new Date().toISOString()
         })
       } else {
-        const { id, ...studentPayload } = form
         await addStudent({
-          ...studentPayload,
+          ...sanitizedStudentPayload,
           createdAt: new Date().toISOString()
         })
       }
@@ -619,6 +658,10 @@ function App() {
       setError('')
       await loadStudents()
     } catch (err) {
+      if (err?.code === '23505') {
+        setError('This roll number is already used in the selected class.')
+        return
+      }
       setError(err.message || 'Unable to save student')
     }
   }
@@ -735,21 +778,95 @@ function App() {
     }
   }
 
-  function handleDownloadStudentReport(student) {
-    setReportsError('')
-    try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
-    } catch (err) {
-      setReportsError(err.message || 'Unable to generate student report')
+  function handleOpenStudentReportModal(student) {
+    const studentExamTypes = Array.from(
+      new Set(
+        marksEntries
+          .filter((entry) => entry.student_id === student.id)
+          .map((entry) => entry.exam_type)
+          .filter(Boolean)
+      )
+    )
+
+    setStudentReportStudent(student)
+    setStudentReportExamTypes(studentExamTypes.length > 0 ? studentExamTypes : EXAM_TYPE_OPTIONS)
+    setStudentReportError('')
+  }
+
+  function handleCloseStudentReportModal() {
+    setStudentReportStudent(null)
+    setStudentReportError('')
+  }
+
+  function handleToggleStudentReportExamType(examType) {
+    setStudentReportError('')
+    setStudentReportExamTypes((prev) =>
+      prev.includes(examType) ? prev.filter((value) => value !== examType) : [...prev, examType]
+    )
+  }
+
+  function handleSelectAllStudentReportExamTypes() {
+    setStudentReportError('')
+    setStudentReportExamTypes(EXAM_TYPE_OPTIONS)
+  }
+
+  function handleClearStudentReportExamTypes() {
+    setStudentReportError('')
+    setStudentReportExamTypes([])
+  }
+
+  function getStudentReportOptions() {
+    return {
+      examTypes: studentReportExamTypes
     }
   }
 
-  function handleShareStudentWhatsApp(student) {
+  function handleToggleTheme() {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
+  }
+
+  function handleDownloadStudentReport(student = studentReportStudent) {
+    if (!student) return
+    if (studentReportExamTypes.length === 0) {
+      setStudentReportError('Select at least one exam type.')
+      return
+    }
+
     setReportsError('')
+    setStudentReportError('')
     try {
-      shareStudentReportOnWhatsApp(student, allAttendance, marksEntries, notesEntries, behaviorEntries)
+      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries, getStudentReportOptions())
+      handleCloseStudentReportModal()
     } catch (err) {
-      setReportsError(err.message || 'Unable to share student report')
+      const message = err.message || 'Unable to generate student report'
+      setStudentReportError(message)
+      setReportsError(message)
+    }
+  }
+
+  async function handleShareStudentWhatsApp(student = studentReportStudent) {
+    if (!student) return
+    if (studentReportExamTypes.length === 0) {
+      setStudentReportError('Select at least one exam type.')
+      return
+    }
+
+    setReportsError('')
+    setStudentReportError('')
+    try {
+      await shareStudentReportOnWhatsApp(
+        student,
+        allAttendance,
+        marksEntries,
+        notesEntries,
+        behaviorEntries,
+        getStudentReportOptions()
+      )
+      handleCloseStudentReportModal()
+    } catch (err) {
+      const message = err.message || 'Unable to share student report'
+      setStudentReportError(message)
+      setReportsError(message)
     }
   }
 
@@ -1188,6 +1305,11 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <div className="theme-toggle-wrap">
+            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+          </div>
           <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking session...</h1>
@@ -1200,6 +1322,11 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <div className="theme-toggle-wrap">
+            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+          </div>
           <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Set a new password</h1>
@@ -1244,6 +1371,11 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <div className="theme-toggle-wrap">
+            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+          </div>
           <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>{isAdminLoginRoute ? 'Admin sign in' : authMode === 'login' ? 'Sign in' : 'Create first account'}</h1>
@@ -1362,6 +1494,11 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <div className="theme-toggle-wrap">
+            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+          </div>
           <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Admin Setup</h1>
@@ -1509,6 +1646,11 @@ function App() {
     return (
       <div className="app-shell auth-shell">
         <section className="panel auth-card">
+          <div className="theme-toggle-wrap">
+            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+          </div>
           <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
           <p className="eyebrow">Teacher Intelligence</p>
           <h1>Checking access...</h1>
@@ -1527,6 +1669,9 @@ function App() {
             <h1>Classwork</h1>
           </div>
           <div className="header-actions">
+            <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
             <span className="session-email">{session.user.email}</span>
             <a href="/" className="button secondary" role="button">
               Back to app
@@ -1678,6 +1823,9 @@ function App() {
             <h1>Marks / Exam Tracking</h1>
           </div>
           <div className="header-actions">
+            <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
             <span className="session-email">{session.user.email}</span>
             <a href="/" className="button secondary" role="button">
               Back to app
@@ -1744,11 +1892,11 @@ function App() {
                     value={marksForm.examType}
                     onChange={(e) => handleMarksFieldChange('examType', e.target.value)}
                   >
-                    <option value="Unit Test">Unit Test</option>
-                    <option value="Mid Term">Mid Term</option>
-                    <option value="Final Exam">Final Exam</option>
-                    <option value="Assignment">Assignment</option>
-                    <option value="Other">Other</option>
+                    {EXAM_TYPE_OPTIONS.map((examType) => (
+                      <option key={examType} value={examType}>
+                        {examType}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="field-group">
@@ -1875,6 +2023,9 @@ function App() {
             <h1>Notes</h1>
           </div>
           <div className="header-actions">
+            <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
             <span className="session-email">{session.user.email}</span>
             <a href="/" className="button secondary" role="button">
               Back to app
@@ -2027,6 +2178,9 @@ function App() {
             <h1>Behavior Assessment</h1>
           </div>
           <div className="header-actions">
+            <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
             <span className="session-email">{session.user.email}</span>
             <a href="/" className="button secondary" role="button">
               Back to app
@@ -2230,6 +2384,9 @@ function App() {
           <h1>Student management portal</h1>
         </div>
         <div className="header-actions">
+          <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+            {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+          </button>
           <span className="session-email">{session.user.email}</span>
           <a href="/classwork" className="button tertiary" role="button">
             Classwork
@@ -2343,6 +2500,16 @@ function App() {
               </div>
             </div>
 
+            <div className="field-group">
+              <label>Address</label>
+              <textarea
+                rows={2}
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                placeholder="Student address"
+              />
+            </div>
+
             <div className="field-grid">
               <div className="field-group">
                 <label>DOB</label>
@@ -2447,13 +2614,13 @@ function App() {
                         <button className="button danger" onClick={() => handleDelete(student.id)}>
                           Delete
                         </button>
-                        <button className="button tertiary" onClick={() => handleDownloadStudentReport(student)}>
+                        <button className="button tertiary" onClick={() => handleOpenStudentReportModal(student)}>
                           Report
                         </button>
                         <button className="button warning" onClick={() => handleOpenAttendanceReportModal(student)}>
                           Attendance Statement
                         </button>
-                        <button className="button tertiary" onClick={() => handleShareStudentWhatsApp(student)}>
+                        <button className="button tertiary" onClick={() => handleOpenStudentReportModal(student)}>
                           Share WA
                         </button>
                       </td>
@@ -2665,6 +2832,59 @@ function App() {
               </button>
               <button type="button" className="button secondary" onClick={handleDownloadAttendanceRangePdf}>
                 Download PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {studentReportStudent && (
+        <div className="modal-overlay" onClick={handleCloseStudentReportModal}>
+          <div className="panel modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Student report filters</p>
+                <h2>{studentReportStudent.name}</h2>
+              </div>
+              <button type="button" className="button tertiary" onClick={handleCloseStudentReportModal}>
+                Close
+              </button>
+            </div>
+
+            <p className="intro">
+              Choose which exam types should appear in the marks section of this student report.
+            </p>
+
+            <div className="report-exam-types">
+              {EXAM_TYPE_OPTIONS.map((examType) => (
+                <label key={examType} className="report-exam-type-item">
+                  <input
+                    type="checkbox"
+                    checked={studentReportExamTypes.includes(examType)}
+                    onChange={() => handleToggleStudentReportExamType(examType)}
+                  />
+                  <span>{examType}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="report-filter-actions">
+              <button type="button" className="button secondary" onClick={handleSelectAllStudentReportExamTypes}>
+                Select All
+              </button>
+              <button type="button" className="button tertiary" onClick={handleClearStudentReportExamTypes}>
+                Clear All
+              </button>
+            </div>
+
+            {studentReportError && <div className="alert error">{studentReportError}</div>}
+
+            <div className="form-actions">
+              <button type="button" className="button primary" onClick={() => handleDownloadStudentReport()}>
+                Download PDF
+              </button>
+              <button type="button" className="button tertiary" onClick={() => handleShareStudentWhatsApp()}>
+                Share WA
               </button>
             </div>
           </div>

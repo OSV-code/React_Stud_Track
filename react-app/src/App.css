@@ -3,6 +3,10 @@
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #090b16;
   color: #e9ecef;
+  --text: #e9ecef;
+  --body-bg: #090b16;
+  --bg-radial-1: rgba(124, 92, 255, 0.2);
+  --bg-radial-2: rgba(14, 165, 233, 0.16);
   --surface: rgba(18, 25, 40, 0.88);
   --surface-strong: rgba(15, 19, 34, 0.96);
   --surface-lift: rgba(255, 255, 255, 0.05);
@@ -13,6 +17,58 @@
   --success: #22c55e;
   --danger: #ef4444;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.25);
+  --header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.02));
+  --input-bg: rgba(255, 255, 255, 0.04);
+  --input-border: rgba(255, 255, 255, 0.12);
+  --input-text: #f8fafc;
+  --option-bg: #12101f;
+  --table-head-bg: rgba(255, 255, 255, 0.04);
+  --table-row-border: rgba(255, 255, 255, 0.06);
+  --table-row-hover: rgba(255, 255, 255, 0.04);
+  --soft-card-bg: rgba(255, 255, 255, 0.03);
+  --secondary-btn-bg: rgba(255, 255, 255, 0.08);
+  --secondary-btn-text: #d1d5db;
+  --tertiary-btn-bg: rgba(255, 255, 255, 0.06);
+  --tertiary-btn-text: #cbd5e1;
+  --pagination-bg: rgba(255, 255, 255, 0.05);
+  --pagination-text: #e2e8f0;
+  --teacher-row-bg: rgba(255, 255, 255, 0.03);
+  --teacher-row-text: #dbeafe;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  background: #eef4ff;
+  color: #0f172a;
+  --text: #0f172a;
+  --body-bg: #eef4ff;
+  --bg-radial-1: rgba(59, 130, 246, 0.2);
+  --bg-radial-2: rgba(6, 182, 212, 0.14);
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-strong: rgba(255, 255, 255, 0.98);
+  --surface-lift: rgba(15, 23, 42, 0.04);
+  --border: rgba(15, 23, 42, 0.14);
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --muted: #475569;
+  --shadow: 0 22px 48px rgba(15, 23, 42, 0.14);
+  --header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(241, 245, 249, 0.9));
+  --input-bg: rgba(255, 255, 255, 0.95);
+  --input-border: rgba(15, 23, 42, 0.16);
+  --input-text: #0f172a;
+  --option-bg: #ffffff;
+  --table-head-bg: rgba(15, 23, 42, 0.04);
+  --table-row-border: rgba(15, 23, 42, 0.1);
+  --table-row-hover: rgba(37, 99, 235, 0.07);
+  --soft-card-bg: rgba(255, 255, 255, 0.9);
+  --secondary-btn-bg: rgba(37, 99, 235, 0.1);
+  --secondary-btn-text: #1e293b;
+  --tertiary-btn-bg: rgba(15, 23, 42, 0.08);
+  --tertiary-btn-text: #1e293b;
+  --pagination-bg: rgba(15, 23, 42, 0.08);
+  --pagination-text: #1e293b;
+  --teacher-row-bg: rgba(255, 255, 255, 0.9);
+  --teacher-row-text: #1e293b;
 }
 
 * {
@@ -26,9 +82,10 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top left, rgba(124, 92, 255, 0.2), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.16), transparent 20%),
-    #090b16;
+  color: var(--text);
+  background: radial-gradient(circle at top left, var(--bg-radial-1), transparent 28%),
+    radial-gradient(circle at bottom right, var(--bg-radial-2), transparent 20%),
+    var(--body-bg);
 }
 
 button,
@@ -52,7 +109,7 @@ button {
   padding: 32px;
   border: 1px solid var(--border);
   border-radius: 32px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.02));
+  background: var(--header-bg);
   box-shadow: var(--shadow);
   display: grid;
   gap: 16px;
@@ -151,22 +208,22 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--input-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #f8fafc;
+  background: var(--input-bg);
+  color: var(--input-text);
   padding: 14px 18px;
   outline: none;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
 select {
-  color-scheme: dark;
+  color-scheme: inherit;
 }
 
 option {
-  background: #12101f;
-  color: #f8fafc;
+  background: var(--option-bg);
+  color: var(--input-text);
 }
 
 input:focus,
@@ -218,13 +275,13 @@ textarea {
 }
 
 .button.secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: #d1d5db;
+  background: var(--secondary-btn-bg);
+  color: var(--secondary-btn-text);
 }
 
 .button.tertiary {
-  background: rgba(255, 255, 255, 0.06);
-  color: #cbd5e1;
+  background: var(--tertiary-btn-bg);
+  color: var(--tertiary-btn-text);
 }
 
 .button.danger {
@@ -269,14 +326,14 @@ table {
 }
 
 thead {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--table-head-bg);
 }
 
 th,
 td {
   text-align: left;
   padding: 18px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--table-row-border);
 }
 
 th {
@@ -291,7 +348,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--table-row-hover);
 }
 
 .empty-state {
@@ -309,7 +366,7 @@ tbody tr:hover {
   padding: 32px;
   border: 1px solid var(--border);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--soft-card-bg);
   text-align: center;
 }
 
@@ -368,8 +425,8 @@ tbody tr:hover {
   height: 42px;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.05);
-  color: #e2e8f0;
+  background: var(--pagination-bg);
+  color: var(--pagination-text);
   font-size: 1rem;
 }
 
@@ -393,7 +450,7 @@ tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--soft-card-bg);
   display: grid;
   gap: 8px;
 }
@@ -418,7 +475,7 @@ tbody tr:hover {
 
 .classwork-notes {
   margin: 0;
-  color: #cbd5e1;
+  color: var(--muted);
   font-style: italic;
   font-size: 0.9rem;
 }
@@ -493,13 +550,23 @@ tbody tr:hover {
 .teacher-row {
   width: 100%;
   text-align: left;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--input-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #dbeafe;
+  background: var(--teacher-row-bg);
+  color: var(--teacher-row-text);
   padding: 12px;
   display: grid;
   gap: 5px;
+}
+
+.theme-toggle-wrap {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.theme-toggle {
+  min-width: 140px;
+  padding: 10px 14px;
 }
 
 .teacher-row small {
@@ -600,7 +667,7 @@ tbody tr:hover {
     border-radius: 18px;
     margin-bottom: 14px;
     padding: 12px 14px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--soft-card-bg);
   }
 
   .panel-table table td {
@@ -609,7 +676,7 @@ tbody tr:hover {
     align-items: center;
     gap: 12px;
     padding: 9px 2px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--table-row-border);
     text-align: right;
   }
 
@@ -690,4 +757,29 @@ tbody tr:hover {
   width: 100%;
   max-height: 90vh;
   overflow-y: auto;
+}
+
+.report-exam-types {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+
+.report-exam-type-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.report-exam-type-item input {
+  width: 16px;
+  height: 16px;
+}
+
+.report-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
 }

@@ -27,6 +27,17 @@ function marksStatsFor(studentId, marksRecords) {
   return { records, average }
 }
 
+function normalizeExamType(examType) {
+  return String(examType || '').trim().toLowerCase()
+}
+
+function filterMarksByExamTypes(marksRecords, examTypes = []) {
+  if (!Array.isArray(examTypes) || examTypes.length === 0) return []
+
+  const allowedExamTypes = new Set(examTypes.map(normalizeExamType))
+  return marksRecords.filter((record) => allowedExamTypes.has(normalizeExamType(record.exam_type)))
+}
+
 function parseDateString(dateStr) {
   const [year, month, day] = dateStr.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day))
@@ -142,7 +153,7 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
+function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = [], options = {}) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
@@ -187,7 +198,9 @@ function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], no
   }
   y += 7
 
-  const marksStats = marksStatsFor(student.id, marksRecords)
+  const selectedExamTypes = Array.isArray(options.examTypes) ? options.examTypes : []
+  const filteredMarks = filterMarksByExamTypes(marksRecords, selectedExamTypes)
+  const marksStats = marksStatsFor(student.id, filteredMarks)
 
   checkPage()
   doc.setFontSize(14)
@@ -195,8 +208,19 @@ function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], no
   y += 8
   doc.setFontSize(12)
 
+  if (selectedExamTypes.length > 0) {
+    const examTypeSummary = selectedExamTypes.join(', ')
+    const summaryLines = doc.splitTextToSize(`Exam Types: ${examTypeSummary}`, 170)
+    summaryLines.forEach((line) => {
+      checkPage()
+      doc.text(line, 20, y)
+      y += 7
+    })
+  }
+
   if (marksStats.records.length === 0) {
-    doc.text('No marks recorded yet.', 20, y)
+    const noMarksText = selectedExamTypes.length > 0 ? 'No marks recorded for selected exam types.' : 'No marks recorded yet.'
+    doc.text(noMarksText, 20, y)
     y += 10
   } else {
     marksStats.records.forEach((mark) => {
@@ -262,8 +286,15 @@ function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], no
   return doc
 }
 
-export function downloadStudentPdfReport(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
-  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords)
+export function downloadStudentPdfReport(
+  student,
+  attendanceRecords,
+  marksRecords = [],
+  notesRecords = [],
+  behaviorRecords = [],
+  options = {}
+) {
+  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
   doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`)
 }
 
@@ -278,9 +309,19 @@ export function downloadJsonBackup(students, attendanceRecords) {
   URL.revokeObjectURL(url)
 }
 
-export async function shareStudentReportOnWhatsApp(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = []) {
-  const marksStats = marksStatsFor(student.id, marksRecords)
+export async function shareStudentReportOnWhatsApp(
+  student,
+  attendanceRecords,
+  marksRecords = [],
+  notesRecords = [],
+  behaviorRecords = [],
+  options = {}
+) {
+  const selectedExamTypes = Array.isArray(options.examTypes) ? options.examTypes : []
+  const filteredMarks = filterMarksByExamTypes(marksRecords, selectedExamTypes)
+  const marksStats = marksStatsFor(student.id, filteredMarks)
   const marksLine = marksStats.records.length > 0 ? `Average Marks: ${marksStats.average}%\n` : ''
+  const examTypeLine = selectedExamTypes.length > 0 ? `Exam Types: ${selectedExamTypes.join(', ')}\n` : ''
 
   const message =
     `📋 *Student Performance Report*\n\n` +
@@ -289,11 +330,12 @@ export async function shareStudentReportOnWhatsApp(student, attendanceRecords, m
     `Class: ${student.className}\n` +
     `Father: ${student.fatherName || 'N/A'}\n` +
     `Mother: ${student.motherName || 'N/A'}\n` +
+    examTypeLine +
     marksLine +
     `\nPlease see the attached student performance report.\n\n` +
     `- Teacher`
 
-  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords)
+  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
   const fileName = `${student.name.replace(/\s+/g, '_')}_Report.pdf`
   const pdfFile = new File([doc.output('blob')], fileName, { type: 'application/pdf' })
 

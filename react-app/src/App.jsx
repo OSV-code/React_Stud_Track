@@ -640,7 +640,8 @@ function App() {
         ...studentPayload,
         name: studentPayload.name.trim(),
         rollNo: studentPayload.rollNo.trim(),
-        className: studentPayload.className.trim()
+        className: studentPayload.className.trim(),
+        dob: studentPayload.dob ? studentPayload.dob : null
       }
 
       if (form.id) {
@@ -1905,6 +1906,7 @@ function App() {
                     id="marksScore"
                     type="number"
                     min="0"
+                    step="any"
                     value={marksForm.score}
                     onChange={(e) => handleMarksFieldChange('score', e.target.value)}
                   />
@@ -1915,6 +1917,7 @@ function App() {
                     id="marksTotalMarks"
                     type="number"
                     min="1"
+                    step="any"
                     value={marksForm.totalMarks}
                     onChange={(e) => handleMarksFieldChange('totalMarks', e.target.value)}
                   />

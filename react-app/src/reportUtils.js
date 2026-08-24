@@ -3,6 +3,23 @@ import * as XLSX from 'xlsx'
 import { supabase } from './supabaseClient'
 import { openWhatsAppShare } from './whatsappUtils'
 
+function loadImageAsDataUrl(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.9), width: img.naturalWidth, height: img.naturalHeight })
+    }
+    img.onerror = () => reject(new Error('Unable to load student photo'))
+    img.src = url
+  })
+}
+
 function attendancePercentFor(studentId, attendanceRecords) {
   const records = attendanceRecords.filter((record) => record.student_id === studentId)
   const total = records.length
@@ -153,11 +170,23 @@ export function downloadClassExcelReport(students, attendanceRecords, classFilte
   XLSX.writeFile(workbook, classFilter && classFilter !== 'all' ? `students_class_${classFilter}.xlsx` : 'students.xlsx')
 }
 
-function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = [], options = {}) {
+async function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], notesRecords = [], behaviorRecords = [], options = {}) {
   const doc = new jsPDF()
 
   doc.setFontSize(20)
   doc.text('Student Performance Report', 20, 20)
+
+  const photoUrl = options.photoUrl
+  let photoSize = 0
+  if (photoUrl) {
+    try {
+      const { dataUrl } = await loadImageAsDataUrl(photoUrl)
+      photoSize = 28
+      doc.addImage(dataUrl, 'JPEG', 190 - photoSize, 12, photoSize, photoSize)
+    } catch (err) {
+      // Continue without the photo if it can't be loaded.
+    }
+  }
 
   doc.setFontSize(14)
   doc.text('Student Details', 20, 35)
@@ -166,7 +195,7 @@ function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], no
   doc.text(`Father: ${student.fatherName || 'N/A'} | Mother: ${student.motherName || 'N/A'}`, 20, 52)
   doc.text(`Phone: ${student.parentPhone || 'N/A'} | Address: ${student.address || 'N/A'} | DOB: ${student.dob || 'N/A'}`, 20, 59)
 
-  let y = 75
+  let y = photoSize ? Math.max(75, 12 + photoSize + 10) : 75
   const checkPage = () => {
     if (y > 270) {
       doc.addPage()
@@ -286,7 +315,7 @@ function buildStudentReportDoc(student, attendanceRecords, marksRecords = [], no
   return doc
 }
 
-export function downloadStudentPdfReport(
+export async function downloadStudentPdfReport(
   student,
   attendanceRecords,
   marksRecords = [],
@@ -294,7 +323,7 @@ export function downloadStudentPdfReport(
   behaviorRecords = [],
   options = {}
 ) {
-  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
+  const doc = await buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
   doc.save(`${student.name.replace(/\s+/g, '_')}_Report.pdf`)
 }
 
@@ -335,7 +364,7 @@ export async function shareStudentReportOnWhatsApp(
     `\nPlease see the attached student performance report.\n\n` +
     `- Teacher`
 
-  const doc = buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
+  const doc = await buildStudentReportDoc(student, attendanceRecords, marksRecords, notesRecords, behaviorRecords, options)
   const fileName = `${student.name.replace(/\s+/g, '_')}_Report.pdf`
   const pdfFile = new File([doc.output('blob')], fileName, { type: 'application/pdf' })
 

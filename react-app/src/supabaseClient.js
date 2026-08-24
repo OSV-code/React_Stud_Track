@@ -83,6 +83,33 @@ export async function deleteStudent(id) {
   return data
 }
 
+const STUDENT_PHOTO_BUCKET = 'student-photos'
+
+export async function uploadStudentPhoto(photoFile) {
+  const {
+    data: { user }
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const fileExt = photoFile.name.split('.').pop()
+  const photoPath = `${user.id}/${crypto.randomUUID()}.${fileExt}`
+  const { error: uploadError } = await supabase.storage.from(STUDENT_PHOTO_BUCKET).upload(photoPath, photoFile)
+  if (uploadError) throw uploadError
+  return photoPath
+}
+
+export async function deleteStudentPhoto(photoPath) {
+  if (!photoPath) return
+  await supabase.storage.from(STUDENT_PHOTO_BUCKET).remove([photoPath])
+}
+
+export async function getStudentPhotoUrl(photoPath) {
+  if (!photoPath) return null
+  const { data, error } = await supabase.storage.from(STUDENT_PHOTO_BUCKET).createSignedUrl(photoPath, 60 * 60)
+  if (error) throw error
+  return data?.signedUrl || null
+}
+
 export async function fetchAttendanceByDate(date) {
   const { data, error } = await supabase.from('attendance').select('*').eq('attendance_date', date)
   if (error) throw error

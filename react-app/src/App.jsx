@@ -5,6 +5,9 @@ import {
   addStudent,
   updateStudent,
   deleteStudent,
+  uploadStudentPhoto,
+  deleteStudentPhoto,
+  getStudentPhotoUrl,
   getPasswordPolicy,
   getUserProfileRole,
   adminSearchTeachers,
@@ -70,7 +73,8 @@ const initialStudentForm = {
   bloodGroup: '',
   admissionNo: '',
   aadharNumber: '',
-  saralPortalNumber: ''
+  saralPortalNumber: '',
+  photo_path: null
 }
 
 const initialClassworkForm = {
@@ -206,6 +210,12 @@ function App() {
   const [studentReportStudent, setStudentReportStudent] = useState(null)
   const [studentReportExamTypes, setStudentReportExamTypes] = useState(EXAM_TYPE_OPTIONS)
   const [studentReportError, setStudentReportError] = useState('')
+  const [studentReportPhotoUrl, setStudentReportPhotoUrl] = useState('')
+  const [studentPhotoFile, setStudentPhotoFile] = useState(null)
+  const [studentPhotoPreview, setStudentPhotoPreview] = useState('')
+  const [studentPhotoRemoved, setStudentPhotoRemoved] = useState(false)
+  const [profileStudent, setProfileStudent] = useState(null)
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState('')
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -644,6 +654,16 @@ function App() {
         dob: studentPayload.dob ? studentPayload.dob : null
       }
 
+      let photoPath = form.photo_path || null
+      if (studentPhotoRemoved) {
+        if (form.photo_path) await deleteStudentPhoto(form.photo_path)
+        photoPath = null
+      } else if (studentPhotoFile) {
+        photoPath = await uploadStudentPhoto(studentPhotoFile)
+        if (form.photo_path) await deleteStudentPhoto(form.photo_path)
+      }
+      sanitizedStudentPayload.photo_path = photoPath
+
       if (form.id) {
         await updateStudent(id, {
           ...sanitizedStudentPayload,
@@ -656,6 +676,9 @@ function App() {
         })
       }
       setForm(initialStudentForm)
+      setStudentPhotoFile(null)
+      setStudentPhotoPreview('')
+      setStudentPhotoRemoved(false)
       setError('')
       await loadStudents()
     } catch (err) {
@@ -667,15 +690,49 @@ function App() {
     }
   }
 
+  function handleStudentPhotoChange(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setStudentPhotoFile(file)
+    setStudentPhotoRemoved(false)
+    const reader = new FileReader()
+    reader.onload = () => setStudentPhotoPreview(reader.result)
+    reader.readAsDataURL(file)
+  }
+
+  function handleRemoveStudentPhoto() {
+    setStudentPhotoFile(null)
+    setStudentPhotoPreview('')
+    setStudentPhotoRemoved(true)
+  }
+
+  function handleResetStudentForm() {
+    setForm(initialStudentForm)
+    setStudentPhotoFile(null)
+    setStudentPhotoPreview('')
+    setStudentPhotoRemoved(false)
+  }
+
   function handleEdit(student) {
     setForm(student)
+    setStudentPhotoFile(null)
+    setStudentPhotoRemoved(false)
+    setStudentPhotoPreview('')
+    if (student.photo_path) {
+      getStudentPhotoUrl(student.photo_path)
+        .then((url) => setStudentPhotoPreview(url || ''))
+        .catch(() => {})
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Delete this student permanently?')) return
     try {
+      const target = students.find((student) => student.id === id)
       await deleteStudent(id)
+      if (target?.photo_path) await deleteStudentPhoto(target.photo_path)
       await loadStudents()
     } catch (err) {
       setError(err.message || 'Unable to delete student')
@@ -779,7 +836,7 @@ function App() {
     }
   }
 
-  function handleOpenStudentReportModal(student) {
+  async function handleOpenStudentReportModal(student) {
     const studentExamTypes = Array.from(
       new Set(
         marksEntries
@@ -792,11 +849,21 @@ function App() {
     setStudentReportStudent(student)
     setStudentReportExamTypes(studentExamTypes.length > 0 ? studentExamTypes : EXAM_TYPE_OPTIONS)
     setStudentReportError('')
+    setStudentReportPhotoUrl('')
+    if (student.photo_path) {
+      try {
+        const url = await getStudentPhotoUrl(student.photo_path)
+        setStudentReportPhotoUrl(url || '')
+      } catch {
+        // Ignore photo load failures; report can still be generated without it.
+      }
+    }
   }
 
   function handleCloseStudentReportModal() {
     setStudentReportStudent(null)
     setStudentReportError('')
+    setStudentReportPhotoUrl('')
   }
 
   function handleToggleStudentReportExamType(examType) {
@@ -818,7 +885,8 @@ function App() {
 
   function getStudentReportOptions() {
     return {
-      examTypes: studentReportExamTypes
+      examTypes: studentReportExamTypes,
+      photoUrl: studentReportPhotoUrl || null
     }
   }
 
@@ -826,7 +894,7 @@ function App() {
     setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))
   }
 
-  function handleDownloadStudentReport(student = studentReportStudent) {
+  async function handleDownloadStudentReport(student = studentReportStudent) {
     if (!student) return
     if (studentReportExamTypes.length === 0) {
       setStudentReportError('Select at least one exam type.')
@@ -836,7 +904,7 @@ function App() {
     setReportsError('')
     setStudentReportError('')
     try {
-      downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries, getStudentReportOptions())
+      await downloadStudentPdfReport(student, allAttendance, marksEntries, notesEntries, behaviorEntries, getStudentReportOptions())
       handleCloseStudentReportModal()
     } catch (err) {
       const message = err.message || 'Unable to generate student report'
@@ -882,6 +950,24 @@ function App() {
   function handleCloseAttendanceReportModal() {
     setAttendanceReportStudent(null)
     setAttendanceReportError('')
+  }
+
+  async function handleOpenStudentProfile(student) {
+    setProfileStudent(student)
+    setProfilePhotoUrl('')
+    if (student.photo_path) {
+      try {
+        const url = await getStudentPhotoUrl(student.photo_path)
+        setProfilePhotoUrl(url || '')
+      } catch {
+        // Ignore photo load failures; profile can still be shown without it.
+      }
+    }
+  }
+
+  function handleCloseStudentProfile() {
+    setProfileStudent(null)
+    setProfilePhotoUrl('')
   }
 
   function handleDownloadAttendanceRangeExcel() {
@@ -2445,7 +2531,37 @@ function App() {
                 placeholder="Student name"
               />
             </div>
-
+                       <div className="field-group">
+              <label>Student Photo</label>
+              <div className="photo-upload-row">
+                {studentPhotoPreview ? (
+                  <img className="photo-preview" src={studentPhotoPreview} alt="Student preview" />
+                ) : (
+                  <div className="photo-preview photo-preview-empty">No photo</div>
+                )}
+                <div className="photo-upload-actions">
+                  <input
+                    id="studentPhotoInput"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleStudentPhotoChange}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => document.getElementById('studentPhotoInput').click()}
+                  >
+                    Upload Photo
+                  </button>
+                  {studentPhotoPreview && (
+                    <button type="button" className="button tertiary" onClick={handleRemoveStudentPhoto}>
+                      Remove Photo
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
             <div className="field-grid">
               <div className="field-group">
                 <label>Roll Number</label>
@@ -2555,10 +2671,10 @@ function App() {
               <button type="submit" className="button primary">
                 {form.id ? 'Update Student' : 'Save Student'}
               </button>
-              <button
+                           <button
                 type="button"
                 className="button secondary"
-                onClick={() => setForm(initialStudentForm)}
+                onClick={handleResetStudentForm}
               >
                 Reset
               </button>
@@ -2621,7 +2737,10 @@ function App() {
                           Report
                         </button>
                         <button className="button warning" onClick={() => handleOpenAttendanceReportModal(student)}>
-                          Attendance Statement
+                          Attendance Record
+                        </button>
+                        <button className="button tertiary" onClick={() => handleOpenStudentProfile(student)}>
+                          Photo
                         </button>
                         <button className="button tertiary" onClick={() => handleOpenStudentReportModal(student)}>
                           Share WA
@@ -2840,7 +2959,27 @@ function App() {
           </div>
         </div>
       )}
+      {profileStudent && (
+        <div className="modal-overlay" onClick={handleCloseStudentProfile}>
+          <div className="panel modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Student photo</p>
+                <h2>{profileStudent.name}</h2>
+              </div>
+              <button type="button" className="button tertiary" onClick={handleCloseStudentProfile}>
+                Close
+              </button>
+            </div>
 
+            {profilePhotoUrl ? (
+              <img className="profile-photo-large" src={profilePhotoUrl} alt={profileStudent.name} />
+            ) : (
+              <p className="empty-state">No photo uploaded for this student.</p>
+            )}
+          </div>
+        </div>
+      )}
       {studentReportStudent && (
         <div className="modal-overlay" onClick={handleCloseStudentReportModal}>
           <div className="panel modal-card" onClick={(e) => e.stopPropagation()}>

@@ -1,5 +1,5 @@
   import jsPDF from 'jspdf'
-  import * as XLSX from 'xlsx'
+  import * as XLSX from 'xlsx-js-style'
   import { supabase } from './supabaseClient'
   import { openWhatsAppShare } from './whatsappUtils'
 
@@ -693,3 +693,129 @@
     const safeName = student.name.replace(/\s+/g, '_')
     doc.save(`${safeName}_Attendance_${startDate}_to_${endDate}.pdf`)
   }
+  // ---- Added: Monthly attendance register for a whole class, matching the
+// standard "Sr. No. | Student Name | 1..31" register layout ----
+
+export function downloadClassMonthlyAttendanceExcel(students, attendanceRecords, className, yearMonth) {
+  if (!className || className === 'all') {
+    throw new Error('Please select a specific class first.')
+  }
+  if (!yearMonth) {
+    throw new Error('Please select a month.')
+  }
+
+  const [yearStr, monthStr] = yearMonth.split('-')
+  const year = Number(yearStr)
+  const month = Number(monthStr)
+  const totalDays = new Date(year, month, 0).getDate()
+
+  const dateStrings = Array.from({ length: totalDays }, (_, i) => {
+    const day = String(i + 1).padStart(2, '0')
+    return `${yearStr}-${monthStr}-${day}`
+  })
+
+  const classStudents = students.filter((student) => student.className === className)
+  if (classStudents.length === 0) {
+    throw new Error(`No students found in Class ${className}.`)
+  }
+
+  const monthLabel = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, 1))
+  )
+
+  const titleRows = [
+    ['Monthly Attendance Register'],
+    [`Class: ${className}`, '', `Month: ${monthLabel}`],
+    []
+  ]
+
+  const headerRow = ['Sr. No.', 'Student Name', ...Array.from({ length: totalDays }, (_, i) => i + 1)]
+
+  const rows = classStudents.map((student, index) => {
+    const studentRecords = attendanceRecords.filter((record) => record.student_id === student.id)
+    const recordByDate = new Map(studentRecords.map((record) => [record.attendance_date, record.status]))
+
+    const dayCells = dateStrings.map((dateStr) => {
+      const status = recordByDate.get(dateStr)
+      return status ? (STATUS_CODE[status] || status) : ''
+    })
+
+    return [index + 1, student.name, ...dayCells]
+  })
+
+  const sheetData = [...titleRows, headerRow, ...rows]
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData)
+  worksheet['!cols'] = [
+    { wch: 8 },
+    { wch: 30 },
+    ...Array.from({ length: totalDays }, () => ({ wch: 4 }))
+  ]
+
+  const titleCellRef = 'A1'
+  if (worksheet[titleCellRef]) {
+    worksheet[titleCellRef].s = { font: { bold: true, sz: 14 } }
+  }
+
+  const lastColIndex = 1 + totalDays
+  const lastRowIndex = sheetData.length - 1
+
+  worksheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastColIndex } }
+  ]
+    // ---- Added: cell borders for the header + data table so grid lines print ----
+  const borderStyle = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  }
+
+  const tableStartRow = titleRows.length // header row index (0-based)
+  const tableEndRow = sheetData.length - 1
+
+  for (let r = tableStartRow; r <= tableEndRow; r += 1) {
+    for (let c = 0; c <= lastColIndex; c += 1) {
+      const cellRef = XLSX.utils.encode_cell({ r, c })
+      if (!worksheet[cellRef]) {
+        worksheet[cellRef] = { t: 's', v: '' }
+      }
+      worksheet[cellRef].s = {
+        ...(worksheet[cellRef].s || {}),
+        border: borderStyle,
+        font: r === tableStartRow ? { bold: true } : worksheet[cellRef].s?.font
+      }
+    }
+  }
+  // ---- End of added borders ----
+
+  // ---- Added: page setup so printing shows all day columns on one page ----
+  worksheet['!pageSetup'] = {
+    orientation: 'landscape',
+    fitToWidth: 1,
+    fitToHeight: 0,
+    scale: 100
+  }
+  worksheet['!margins'] = {
+    left: 0.3,
+    right: 0.3,
+    top: 0.5,
+    bottom: 0.5,
+    header: 0.2,
+    footer: 0.2
+  }
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Monthly Attendance Register')
+
+  const lastColLetter = XLSX.utils.encode_col(lastColIndex)
+  if (!workbook.Workbook) workbook.Workbook = {}
+  if (!workbook.Workbook.Names) workbook.Workbook.Names = []
+  workbook.Workbook.Names.push({
+    Sheet: 0,
+    Name: '_xlnm.Print_Area',
+    Ref: `'Monthly Attendance Register'!$A$1:$${lastColLetter}$${lastRowIndex + 1}`
+  })
+  // ---- End of added page setup ----
+
+  XLSX.writeFile(workbook, `Class_${className}_Attendance_${yearStr}-${monthStr}.xlsx`)
+}

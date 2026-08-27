@@ -38,7 +38,8 @@ import {
   downloadJsonBackup,
   shareStudentReportOnWhatsApp,
   downloadStudentAttendanceRangeExcel,
-  downloadStudentAttendanceRangePdf
+  downloadStudentAttendanceRangePdf,
+  downloadClassMonthlyAttendanceExcel
 } from './reportUtils'
 import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
 import './App.css'
@@ -173,6 +174,8 @@ function App() {
   const [allAttendance, setAllAttendance] = useState([])
   const [reportClassFilter, setReportClassFilter] = useState('all')
   const [reportsError, setReportsError] = useState('')
+     const [registerMonth, setRegisterMonth] = useState(() => getTodayDateString().slice(0, 7))
+   const [registerError, setRegisterError] = useState('')
   const [classworkForm, setClassworkForm] = useState(initialClassworkForm)
   const [classworkEntries, setClassworkEntries] = useState([])
   const [classworkClassFilter, setClassworkClassFilter] = useState('all')
@@ -826,6 +829,14 @@ function App() {
       setReportsError(err.message || 'Unable to generate Excel report')
     }
   }
+     function handleDownloadClassAttendanceRegister() {
+     setRegisterError('')
+     try {
+       downloadClassMonthlyAttendanceExcel(students, allAttendance, selectedClass, registerMonth)
+     } catch (err) {
+       setRegisterError(err.message || 'Unable to generate attendance register')
+     }
+   }
 
   function handleBackupJson() {
     setReportsError('')
@@ -2689,7 +2700,7 @@ function App() {
               <h2>Student records</h2>
               <p className="intro">Open a student to export a date-range attendance statement as Excel or PDF with daily P, Ab, and L codes.</p>
             </div>
-            <div className="filter-row">
+                     <div className="filter-row">
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -2702,8 +2713,18 @@ function App() {
                   </option>
                 ))}
               </select>
+              <input
+                type="month"
+                value={registerMonth}
+                onChange={(e) => setRegisterMonth(e.target.value)}
+              />
+              <button type="button" className="button primary" onClick={handleDownloadClassAttendanceRegister}>
+                Download Class Attendance Register
+              </button>
             </div>
           </div>
+
+          {registerError && <div className="alert error">{registerError}</div>}
 
           {shouldShowStudentRecords ? (
             <div className="table-wrapper">

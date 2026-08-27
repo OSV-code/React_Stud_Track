@@ -39,7 +39,8 @@ import {
   shareStudentReportOnWhatsApp,
   downloadStudentAttendanceRangeExcel,
   downloadStudentAttendanceRangePdf,
-  downloadClassMonthlyAttendanceExcel
+  downloadClassMonthlyAttendanceExcel,
+  downloadClassMarksRegisterExcel
 } from './reportUtils'
 import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
 import './App.css'
@@ -183,6 +184,7 @@ function App() {
   const [reportsError, setReportsError] = useState('')
      const [registerMonth, setRegisterMonth] = useState(() => getTodayDateString().slice(0, 7))
    const [registerError, setRegisterError] = useState('')
+  const [marksRegisterExamType, setMarksRegisterExamType] = useState('Unit Test')
   const [classworkForm, setClassworkForm] = useState(initialClassworkForm)
   const [classworkEntries, setClassworkEntries] = useState([])
   const [classworkClassFilter, setClassworkClassFilter] = useState('all')
@@ -844,6 +846,15 @@ function App() {
        setRegisterError(err.message || 'Unable to generate attendance register')
      }
    }
+
+  function handleDownloadClassMarksRegister() {
+    setRegisterError('')
+    try {
+      downloadClassMarksRegisterExcel(students, marksEntries, selectedClass, marksRegisterExamType)
+    } catch (err) {
+      setRegisterError(err.message || 'Unable to generate marks register')
+    }
+  }
 
   function handleBackupJson() {
     setReportsError('')
@@ -2729,6 +2740,20 @@ function App() {
               <button type="button" className="button primary" onClick={handleDownloadClassAttendanceRegister}>
                 Download Class Attendance Register
               </button>
+              <select
+                value={marksRegisterExamType}
+                onChange={(e) => setMarksRegisterExamType(e.target.value)}
+                aria-label="Marks register exam type"
+              >
+                {EXAM_TYPE_OPTIONS.map((examType) => (
+                  <option key={examType} value={examType}>
+                    Marks: {examType}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="button primary" onClick={handleDownloadClassMarksRegister}>
+                Download Class Marks Register
+              </button>
             </div>
           </div>
 
@@ -2931,8 +2956,8 @@ function App() {
 
           {reportsError && <div className="alert error">{reportsError}</div>}
           <p className="empty-state">
-            Reports include student details and attendance summary. Marks, homework, behavior, and notes will appear
-            once those modules are added.
+            Reports include student details and attendance summary. Use the Marks register controls above to export one
+            class-wise sheet with students as rows and subjects as dynamic columns for the selected exam.
           </p>
         </section>
       </main>

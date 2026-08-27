@@ -704,6 +704,161 @@
   // ---- Added: Monthly attendance register for a whole class, matching the
 // standard "Sr. No. | Student Name | 1..31" register layout ----
 
+export function downloadClassMarksRegisterExcel(students, marksRecords, className, examType) {
+  if (!className || className === 'all') {
+    throw new Error('Please select a specific class first.')
+  }
+  if (!examType) {
+    throw new Error('Please select an exam type.')
+  }
+
+  const classStudents = students
+    .filter((student) => student.className === className)
+    .sort(compareByRollNo)
+
+  if (classStudents.length === 0) {
+    throw new Error(`No students found in Class ${className}.`)
+  }
+
+  const normalizedExamType = String(examType).trim().toLowerCase()
+  const classStudentIds = new Set(classStudents.map((student) => student.id))
+  const examMarks = marksRecords.filter(
+    (record) =>
+      classStudentIds.has(record.student_id) &&
+      String(record.exam_type || '').trim().toLowerCase() === normalizedExamType
+  )
+
+  if (examMarks.length === 0) {
+    throw new Error(`No marks found for Class ${className} and ${examType}.`)
+  }
+
+  const subjects = []
+  const subjectKeys = new Set()
+  examMarks.forEach((record) => {
+    const subject = String(record.subject || '').trim()
+    const key = subject.toLowerCase()
+    if (subject && !subjectKeys.has(key)) {
+      subjectKeys.add(key)
+      subjects.push(subject)
+    }
+  })
+
+  if (subjects.length === 0) {
+    throw new Error(`No subjects found for Class ${className} and ${examType}.`)
+  }
+
+  // If a student has multiple entries for the same subject/exam, use the latest one.
+  const marksByStudentSubject = new Map()
+  examMarks.forEach((record) => {
+    const subjectKey = String(record.subject || '').trim().toLowerCase()
+    const key = `${record.student_id}::${subjectKey}`
+    const existing = marksByStudentSubject.get(key)
+    const recordDate = String(record.exam_date || record.created_at || '')
+    const existingDate = String(existing?.exam_date || existing?.created_at || '')
+    if (!existing || recordDate >= existingDate) {
+      marksByStudentSubject.set(key, record)
+    }
+  })
+
+  const titleRows = [
+    ['Class Marks Register'],
+    [`Class: ${className}`, '', `Exam: ${examType}`],
+    []
+  ]
+
+  const headerRow = ['Sr. No.', 'Student Name', ...subjects, 'Total', 'Percentage']
+
+  const rows = classStudents.map((student, index) => {
+    let obtainedTotal = 0
+    let maximumTotal = 0
+
+    const subjectCells = subjects.map((subject) => {
+      const key = `${student.id}::${subject.toLowerCase()}`
+      const mark = marksByStudentSubject.get(key)
+      if (!mark) return ''
+
+      const score = Number(mark.score)
+      const totalMarks = Number(mark.total_marks)
+      if (Number.isFinite(score)) obtainedTotal += score
+      if (Number.isFinite(totalMarks) && totalMarks > 0) maximumTotal += totalMarks
+
+      return `${mark.score} / ${mark.total_marks}`
+    })
+
+    const percentage = maximumTotal > 0 ? `${Math.round((obtainedTotal / maximumTotal) * 100)}%` : ''
+    const total = maximumTotal > 0 ? `${obtainedTotal} / ${maximumTotal}` : ''
+
+    return [index + 1, student.name, ...subjectCells, total, percentage]
+  })
+
+  const sheetData = [...titleRows, headerRow, ...rows]
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData)
+
+  worksheet['!cols'] = [
+    { wch: 8 },
+    { wch: 28 },
+    ...subjects.map(() => ({ wch: 16 })),
+    { wch: 14 },
+    { wch: 12 }
+  ]
+
+  const border = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  }
+  const titleStyle = {
+    font: { bold: true, sz: 16 },
+    alignment: { vertical: 'center', horizontal: 'left' }
+  }
+  const subTitleStyle = {
+    font: { bold: true, sz: 11 },
+    alignment: { vertical: 'center', horizontal: 'left' }
+  }
+  const headerStyle = {
+    font: { bold: true, sz: 10 },
+    alignment: { vertical: 'center', horizontal: 'center', wrapText: true },
+    border
+  }
+  const bodyStyle = {
+    alignment: { vertical: 'center', horizontal: 'center' },
+    border
+  }
+  const nameStyle = {
+    alignment: { vertical: 'center', horizontal: 'left' },
+    border
+  }
+
+  worksheet['A1'].s = titleStyle
+  worksheet['A2'].s = subTitleStyle
+  worksheet['C2'].s = subTitleStyle
+
+  for (let col = 0; col < headerRow.length; col += 1) {
+    const cell = XLSX.utils.encode_cell({ r: 3, c: col })
+    if (worksheet[cell]) worksheet[cell].s = headerStyle
+  }
+
+  for (let row = 4; row < sheetData.length; row += 1) {
+    for (let col = 0; col < headerRow.length; col += 1) {
+      const cell = XLSX.utils.encode_cell({ r: row, c: col })
+      if (!worksheet[cell]) continue
+      worksheet[cell].s = col === 1 ? nameStyle : bodyStyle
+    }
+  }
+
+  worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: headerRow.length - 1 } }]
+  worksheet['!rows'] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 8 }, { hpt: 24 }]
+  worksheet['!freeze'] = { xSplit: 2, ySplit: 4 }
+  worksheet['!autofilter'] = {
+    ref: `A4:${XLSX.utils.encode_col(headerRow.length - 1)}${sheetData.length}`
+  }
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Marks Register')
+  XLSX.writeFile(workbook, `Class_${className}_${String(examType).replace(/\s+/g, '_')}_Marks_Register.xlsx`)
+}
+
 export function downloadClassMonthlyAttendanceExcel(students, attendanceRecords, className, yearMonth) {
   if (!className || className === 'all') {
     throw new Error('Please select a specific class first.')

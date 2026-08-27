@@ -186,6 +186,14 @@
     Absent: 'Ab',
     Late: 'L'
   }
+  function compareByRollNo(a, b) {
+  const rollA = Number(String(a.rollNo).trim())
+  const rollB = Number(String(b.rollNo).trim())
+  if (!Number.isNaN(rollA) && !Number.isNaN(rollB)) {
+    return rollA - rollB
+  }
+  return String(a.rollNo).localeCompare(String(b.rollNo))
+}
 
   export function downloadClassPdfReport(students, attendanceRecords, classFilter) {
     const doc = new jsPDF('p', 'mm', 'a4')
@@ -714,7 +722,9 @@ export function downloadClassMonthlyAttendanceExcel(students, attendanceRecords,
     return `${yearStr}-${monthStr}-${day}`
   })
 
-  const classStudents = students.filter((student) => student.className === className)
+    const classStudents = students
+    .filter((student) => student.className === className)
+    .sort(compareByRollNo)
   if (classStudents.length === 0) {
     throw new Error(`No students found in Class ${className}.`)
   }

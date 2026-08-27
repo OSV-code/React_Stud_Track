@@ -60,7 +60,14 @@ function marksTier(percent) {
   if (percent < 75) return 'mid'
   return 'high'
 }
-
+function compareByRollNo(a, b) {
+  const rollA = Number(String(a.rollNo).trim())
+  const rollB = Number(String(b.rollNo).trim())
+  if (!Number.isNaN(rollA) && !Number.isNaN(rollB)) {
+    return rollA - rollB
+  }
+  return String(a.rollNo).localeCompare(String(b.rollNo))
+}
 const initialStudentForm = {
   id: null,
   name: '',
@@ -1280,11 +1287,11 @@ function App() {
     return ['all', ...Array.from(set).sort()]
   }, [students])
 
-  const attendanceStudents = useMemo(
+   const attendanceStudents = useMemo(
     () =>
-      students.filter(
-        (student) => attendanceClassFilter === 'all' || student.className === attendanceClassFilter
-      ),
+      students
+        .filter((student) => attendanceClassFilter === 'all' || student.className === attendanceClassFilter)
+        .sort(compareByRollNo),
     [students, attendanceClassFilter]
   )
 
@@ -1385,15 +1392,16 @@ function App() {
     [behaviorEntriesWithStudent, behaviorClassFilter]
   )
 
-  const filteredStudents = students.filter((student) => {
-    const matchesSearch = [student.name, student.rollNo, student.className]
-      .join(' ')
-      .toLowerCase()
-      .includes(search.toLowerCase())
-    const matchesClass = selectedClass === 'all' || student.className === selectedClass
-    return matchesSearch && matchesClass
-  })
-
+    const filteredStudents = students
+    .filter((student) => {
+      const matchesSearch = [student.name, student.rollNo, student.className]
+        .join(' ')
+        .toLowerCase()
+        .includes(search.toLowerCase())
+      const matchesClass = selectedClass === 'all' || student.className === selectedClass
+      return matchesSearch && matchesClass
+    })
+    .sort(compareByRollNo)
   const shouldShowStudentRecords = search.trim().length > 0 || selectedClass !== 'all'
 
   const isStudentsTableMissing =

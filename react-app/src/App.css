@@ -995,13 +995,16 @@ tbody tr:hover {
 }
 
 .dashboard-sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  position: fixed;
+  z-index: 20;
+  inset: 0 auto 0 0;
+  width: 220px;
+  height: 100dvh;
   min-height: 560px;
   padding: 18px 12px 12px;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
@@ -1124,6 +1127,7 @@ tbody tr:hover {
 }
 
 .dashboard-workspace {
+  grid-column: 2;
   width: min(100%, 1420px);
   min-width: 0;
   margin: 0 auto;
@@ -1390,6 +1394,10 @@ tbody tr:hover {
     grid-template-columns: 185px minmax(0, 1fr);
   }
 
+  .dashboard-sidebar {
+    width: 185px;
+  }
+
   .dashboard-workspace {
     padding-right: 22px;
     padding-left: 22px;
@@ -1411,9 +1419,12 @@ tbody tr:hover {
     position: sticky;
     z-index: 10;
     top: 0;
+    inset: auto;
+    width: 100%;
     height: auto;
     min-height: 0;
     padding: 8px 12px;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
@@ -1541,6 +1552,7 @@ tbody tr:hover {
   width: min(1420px, calc(100% - 40px));
   margin: 0 auto;
   padding: 24px 0 48px;
+  overflow: visible;
   color: var(--text);
   background: transparent;
   font-family: 'Aptos', 'Segoe UI Variable', 'Segoe UI', sans-serif;
@@ -1776,6 +1788,53 @@ tbody tr:hover {
   box-shadow: none;
 }
 
+.feature-shell main,
+.feature-shell main > *,
+.feature-shell .panel,
+.feature-shell .student-form,
+.feature-shell .field-grid,
+.feature-shell .field-group,
+.dashboard-shell main,
+.dashboard-shell main > *,
+.dashboard-shell .panel,
+.dashboard-shell .student-form,
+.dashboard-shell .field-grid,
+.dashboard-shell .field-group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.feature-shell input,
+.feature-shell select,
+.feature-shell textarea,
+.dashboard-shell input,
+.dashboard-shell select,
+.dashboard-shell textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.feature-shell .form-actions,
+.dashboard-shell .form-actions {
+  min-width: 0;
+}
+
+.feature-shell .form-actions > .button,
+.dashboard-shell .form-actions > .button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.feature-shell .table-wrapper,
+.dashboard-shell .table-wrapper {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
 :root[data-theme='dark'] .feature-shell .status-button.active {
   border-color: #e8e9eb;
   background: #e8e9eb;
@@ -1866,6 +1925,57 @@ tbody tr:hover {
     padding: 16px 0 32px;
   }
 
+  .feature-shell .field-grid,
+  .dashboard-shell .field-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .feature-shell .field-group,
+  .dashboard-shell .field-group {
+    width: 100%;
+  }
+
+  .feature-shell input,
+  .feature-shell select,
+  .feature-shell textarea,
+  .dashboard-shell input,
+  .dashboard-shell select,
+  .dashboard-shell textarea {
+    width: 100%;
+  }
+
+  .feature-shell .form-actions,
+  .dashboard-shell .form-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .feature-shell .form-actions > .button,
+  .dashboard-shell .form-actions > .button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .feature-shell .filter-row,
+  .dashboard-shell .filter-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .feature-shell .filter-row > *,
+  .dashboard-shell .filter-row > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .feature-shell .table-actions,
+  .dashboard-shell .table-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
   .feature-shell .app-header {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -1911,5 +2021,43 @@ tbody tr:hover {
 
   .feature-shell .panel {
     padding: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .feature-shell .panel-table table,
+  .dashboard-shell .panel-table table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .feature-shell .panel-table table td,
+  .dashboard-shell .panel-table table td {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .feature-shell .panel-table table td.table-actions,
+  .dashboard-shell .panel-table table td.table-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr));
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .feature-shell .panel-table table td.table-actions::before,
+  .dashboard-shell .panel-table table td.table-actions::before {
+    grid-column: 1 / -1;
+    margin: 0 0 2px;
+  }
+
+  .feature-shell .panel-table table td.table-actions .button,
+  .dashboard-shell .panel-table table td.table-actions .button {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 7px 8px;
+    overflow-wrap: anywhere;
   }
 }

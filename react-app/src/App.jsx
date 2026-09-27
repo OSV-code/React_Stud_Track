@@ -76,6 +76,27 @@ function marksTier(percent) {
   if (percent < 75) return 'mid'
   return 'high'
 }
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId))
+}
+
+function SessionCheckScreen({ message }) {
+  return (
+    <main className="session-check-screen" role="status" aria-live="polite">
+      <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse" />
+      <div className="session-check-spinner" aria-hidden="true" />
+      <h1>{message}</h1>
+      <p>Verifying your secure session</p>
+    </main>
+  )
+}
+
 function compareByRollNo(a, b) {
   const rollA = Number(String(a.rollNo).trim())
   const rollB = Number(String(b.rollNo).trim())
@@ -84,6 +105,36 @@ function compareByRollNo(a, b) {
   }
   return String(a.rollNo).localeCompare(String(b.rollNo))
 }
+
+function FeatureNavigation({ activePath, userRole }) {
+  const links = [
+    { label: 'Dashboard', href: '/' },
+    { label: 'Students', href: '/#students' },
+    { label: 'Attendance', href: '/#attendance' },
+    { label: 'Marks', href: '/marks' },
+    { label: 'Notes', href: '/notes' },
+    { label: 'Behavior', href: '/behavior' },
+    { label: 'Fees', href: '/fees' },
+    { label: 'Classwork', href: '/classwork' },
+    ...(userRole === 'admin' ? [{ label: 'Admin setup', href: '/admin' }] : [])
+  ]
+
+  return (
+    <nav className="feature-navigation" aria-label="App sections">
+      {links.map((link) => (
+        <a
+          key={link.label}
+          className={`feature-navigation-link${link.href === activePath ? ' active' : ''}`}
+          href={link.href}
+          aria-current={link.href === activePath ? 'page' : undefined}
+        >
+          {link.label}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
 const initialStudentForm = {
   id: null,
   name: '',
@@ -148,9 +199,9 @@ function App() {
   const isFeesRoute = typeof window !== 'undefined' && window.location.pathname === '/fees'
   const [session, setSession] = useState(null)
   const [theme, setTheme] = useState(() => {
-    if (typeof window === 'undefined') return 'dark'
+    if (typeof window === 'undefined') return 'light'
     const storedTheme = window.localStorage.getItem('stud-tracker-theme')
-    return storedTheme === 'light' ? 'light' : 'dark'
+    return storedTheme === 'dark' ? 'dark' : 'light'
   })
   const [userRole, setUserRole] = useState('teacher')
   const [authLoading, setAuthLoading] = useState(true)
@@ -275,13 +326,24 @@ function App() {
     let isMounted = true
 
     async function bootstrapSession() {
-      const {
-        data: { session: currentSession }
-      } = await supabase.auth.getSession()
+      try {
+        const {
+          data: { session: currentSession },
+          error: sessionError
+        } = await supabase.auth.getSession()
 
-      if (isMounted) {
-        setSession(currentSession)
+        if (sessionError) throw sessionError
+
+        if (isMounted) setSession(currentSession)
+      } catch (err) {
+        if (isMounted) {
+          setSession(null)
+          setAuthError(err.message || 'Unable to restore your session. Please sign in again.')
+        }
+      } finally {
+        if (isMounted) {
         setAuthLoading(false)
+        }
       }
     }
 
@@ -404,7 +466,11 @@ function App() {
     setAccessChecked(false)
 
     try {
-      const role = await getUserProfileRole(session.user.id)
+      const role = await withTimeout(
+        getUserProfileRole(session.user.id),
+        15000,
+        'Access check timed out. Check your connection and sign in again.'
+      )
       setUserRole(role)
 
       // Admins are not subject to the PIN/trial expiry gate -- that gate exists
@@ -416,7 +482,11 @@ function App() {
         return
       }
 
-      const policy = await getPasswordPolicy(session.user.id)
+      const policy = await withTimeout(
+        getPasswordPolicy(session.user.id),
+        15000,
+        'Access check timed out. Check your connection and sign in again.'
+      )
 
       if (!policy) {
         await supabase.auth.signOut()
@@ -1613,6 +1683,20 @@ function App() {
     }
   }, [feeRows])
 
+  const dailyAttendanceSummary = useMemo(
+    () =>
+      Object.values(attendanceDraft).reduce(
+        (summary, status) => {
+          if (status === 'Present') summary.present += 1
+          if (status === 'Absent') summary.absent += 1
+          if (status === 'Late') summary.late += 1
+          return summary
+        },
+        { present: 0, absent: 0, late: 0 }
+      ),
+    [attendanceDraft]
+  )
+
   const feeReminders = useMemo(
     () =>
       feeRows
@@ -1651,25 +1735,14 @@ function App() {
       return matchesSearch && matchesClass
     })
     .sort(compareByRollNo)
-  const shouldShowStudentRecords = search.trim().length > 0 || selectedClass !== 'all'
+  const shouldShowStudentRecords = selectedClass !== 'all'
 
   const isStudentsTableMissing =
     typeof error === 'string' && error.toLowerCase().includes("could not find the table 'public.students'")
 
   if (authLoading) {
     return (
-      <div className="app-shell auth-shell">
-        <section className="panel auth-card">
-          <div className="theme-toggle-wrap">
-            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
-              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
-            </button>
-          </div>
-          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
-          <p className="eyebrow">Teacher Intelligence</p>
-          <h1>Checking session...</h1>
-        </section>
-      </div>
+      <SessionCheckScreen message="Restoring your session" />
     )
   }
 
@@ -1847,7 +1920,8 @@ function App() {
 
   if (isAdminRoute) {
     return (
-      <div className="app-shell auth-shell">
+      <div className="app-shell auth-shell admin-setup-shell">
+        <FeatureNavigation activePath="/admin" userRole={userRole} />
         <section className="panel auth-card">
           <div className="theme-toggle-wrap">
             <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
@@ -1998,25 +2072,12 @@ function App() {
   }
 
   if (!accessChecked) {
-    return (
-      <div className="app-shell auth-shell">
-        <section className="panel auth-card">
-          <div className="theme-toggle-wrap">
-            <button type="button" className="button tertiary theme-toggle" onClick={handleToggleTheme}>
-              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
-            </button>
-          </div>
-          <img className="brand-wordmark" src="/pwa/icon-wordmark.svg" alt="ClassPulse" />
-          <p className="eyebrow">Teacher Intelligence</p>
-          <h1>Checking access...</h1>
-        </section>
-      </div>
-    )
+    return <SessionCheckScreen message="Checking your access" />
   }
 
   if (isClassworkRoute) {
     return (
-      <div className="app-shell">
+      <div className="app-shell feature-shell">
         <header className="app-header">
           <div>
             <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
@@ -2036,6 +2097,8 @@ function App() {
             </button>
           </div>
         </header>
+
+        <FeatureNavigation activePath="/classwork" userRole={userRole} />
 
         <main>
           <section className="panel panel-form">
@@ -2170,7 +2233,7 @@ function App() {
 
   if (isMarksRoute) {
     return (
-      <div className="app-shell">
+      <div className="app-shell feature-shell">
         <header className="app-header">
           <div>
             <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
@@ -2190,6 +2253,8 @@ function App() {
             </button>
           </div>
         </header>
+
+        <FeatureNavigation activePath="/marks" userRole={userRole} />
 
         <main>
           <section className="panel panel-form">
@@ -2372,7 +2437,7 @@ function App() {
 
   if (isNotesRoute) {
     return (
-      <div className="app-shell">
+      <div className="app-shell feature-shell">
         <header className="app-header">
           <div>
             <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
@@ -2392,6 +2457,8 @@ function App() {
             </button>
           </div>
         </header>
+
+        <FeatureNavigation activePath="/notes" userRole={userRole} />
 
         <main>
           <section className="panel panel-form">
@@ -2527,7 +2594,7 @@ function App() {
 
   if (isBehaviorRoute) {
     return (
-      <div className="app-shell">
+      <div className="app-shell feature-shell">
         <header className="app-header">
           <div>
             <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
@@ -2547,6 +2614,8 @@ function App() {
             </button>
           </div>
         </header>
+
+        <FeatureNavigation activePath="/behavior" userRole={userRole} />
 
         <main>
           <section className="panel panel-form">
@@ -2734,7 +2803,7 @@ function App() {
 
   if (isFeesRoute) {
     return (
-      <div className="app-shell">
+      <div className="app-shell feature-shell">
         <header className="app-header">
           <div>
             <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
@@ -2754,6 +2823,8 @@ function App() {
             </button>
           </div>
         </header>
+
+        <FeatureNavigation activePath="/fees" userRole={userRole} />
 
         <main>
           <section className="panel">
@@ -3042,69 +3113,77 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
-          <p className="eyebrow">Teacher Intelligence</p>
-          <h1>Student management portal</h1>
-        </div>
-        <div className="header-actions">
-          <button type="button" className="button tertiary" onClick={handleToggleTheme}>
-            {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
-          </button>
-          <span className="session-email">{session.user.email}</span>
-          <a href="/classwork" className="button tertiary" role="button">
-            Classwork
-          </a>
-          <a href="/marks" className="button tertiary" role="button">
-            Marks
-          </a>
-          <a href="/notes" className="button tertiary" role="button">
-            Notes
-          </a>
-          <a href="/behavior" className="button tertiary" role="button">
-            Behavior
-          </a>
-          <a href="/fees" className="button tertiary" role="button">
-            Fees
-          </a>
+    <div className="app-shell dashboard-shell">
+      <aside className="dashboard-sidebar">
+        <a className="dashboard-brand" href="/" aria-label="ClassPulse dashboard">
+          <img className="brand-mark" src="/pwa/icon-mark.svg" alt="" />
+          <span>ClassPulse</span>
+        </a>
+        <nav className="dashboard-nav" aria-label="Main navigation">
+          <p className="dashboard-nav-label">Overview</p>
+          <a className="dashboard-nav-link active" href="#dashboard"><span aria-hidden="true">▦</span>Dashboard</a>
+          <p className="dashboard-nav-label">Records</p>
+          <a className="dashboard-nav-link" href="#students"><span aria-hidden="true">♙</span>Students</a>
+          <a className="dashboard-nav-link" href="#attendance"><span aria-hidden="true">◷</span>Attendance</a>
+          <a className="dashboard-nav-link" href="/marks"><span aria-hidden="true">▥</span>Marks</a>
+          <a className="dashboard-nav-link" href="/notes"><span aria-hidden="true">▤</span>Notes</a>
+          <a className="dashboard-nav-link" href="/behavior"><span aria-hidden="true">◎</span>Behavior</a>
+          <a className="dashboard-nav-link" href="/fees"><span aria-hidden="true">▣</span>Fees</a>
+          <p className="dashboard-nav-label">Classwork</p>
+          <a className="dashboard-nav-link" href="/classwork"><span aria-hidden="true">▧</span>Classwork</a>
           {userRole === 'admin' && (
-            <a href="/admin" className="button tertiary" role="button">
-              Admin Setup
-            </a>
+            <>
+              <p className="dashboard-nav-label">System</p>
+              <a className="dashboard-nav-link" href="/admin"><span aria-hidden="true">⚙</span>Admin setup</a>
+            </>
           )}
-          <button type="button" className="button secondary" onClick={handleLogout}>
-            Sign out
+        </nav>
+        <div className="dashboard-account">
+          <span className="dashboard-avatar" aria-hidden="true">{session.user.email.slice(0, 1).toUpperCase()}</span>
+          <span className="session-email">{session.user.email}</span>
+          <button type="button" className="dashboard-quiet-button" onClick={handleToggleTheme}>
+            {theme === 'light' ? 'Dark theme' : 'Light theme'}
           </button>
+          <button type="button" className="dashboard-quiet-button" onClick={handleLogout}>Sign out</button>
         </div>
-      </header>
+      </aside>
 
-      <main>
+      <div className="dashboard-workspace">
+        <header className="dashboard-heading" id="dashboard">
+          <div>
+            <p className="eyebrow">Teacher intelligence</p>
+            <h1>Dashboard</h1>
+            <p className="dashboard-subtitle">{students.length} students across {classes.length - 1} classes</p>
+          </div>
+          <div className="dashboard-heading-actions">
+            <button type="button" className="button tertiary" onClick={handleDownloadClassExcel}>Export Excel</button>
+            <a className="button primary" href="#student-form">+ Add student</a>
+          </div>
+        </header>
+
+      <main className="dashboard-content">
+        <section className="dashboard-metrics" aria-label="Daily overview">
+          <div className="dashboard-metric"><span>Total students</span><strong>{students.length}</strong></div>
+          <div className="dashboard-metric metric-present"><span>Present today</span><strong>{dailyAttendanceSummary.present}</strong></div>
+          <div className="dashboard-metric metric-absent"><span>Absent today</span><strong>{dailyAttendanceSummary.absent}</strong></div>
+          <div className="dashboard-metric metric-fees"><span>Fees due soon</span><strong>{feeSummary.upcomingCount}</strong></div>
+        </section>
+
         {(feeSummary.overdueCount > 0 || feeSummary.upcomingCount > 0) && (
-          <section className="panel fee-alerts-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Notifications</p>
-                <h2>Fee Alerts</h2>
-              </div>
-              <a href="/fees" className="button tertiary" role="button">
-                View Fees
-              </a>
-            </div>
+          <section className="dashboard-alert fee-alerts-panel">
             <ul className="fee-reminder-list">
               {feeSummary.overdueCount > 0 && (
                 <li className="fee-reminder-item fee-reminder-overdue">
-                  🔴 {feeSummary.overdueCount} overdue payment{feeSummary.overdueCount === 1 ? '' : 's'}
+                  {feeSummary.overdueCount} overdue payment{feeSummary.overdueCount === 1 ? '' : 's'}
                 </li>
               )}
               {feeSummary.upcomingCount > 0 && (
                 <li className="fee-reminder-item fee-reminder-upcoming">
-                  🟠 {feeSummary.upcomingCount} payment{feeSummary.upcomingCount === 1 ? '' : 's'} due within{' '}
-                  {UPCOMING_REMINDER_DAYS} days
+                  {feeSummary.upcomingCount} payment{feeSummary.upcomingCount === 1 ? '' : 's'} due within {UPCOMING_REMINDER_DAYS} days
                 </li>
               )}
             </ul>
+            <a href="/fees">View fees</a>
           </section>
         )}
 
@@ -3118,7 +3197,7 @@ function App() {
           </section>
         )}
 
-        <section className="panel panel-form">
+        <section className="panel panel-form" id="student-form">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Student record</p>
@@ -3289,11 +3368,11 @@ function App() {
           </form>
         </section>
 
-        <section className="panel panel-table">
+        <section className="panel panel-table dashboard-roster" id="students">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Student roster</p>
-              <h2>Student records</h2>
+              <p className="eyebrow">Records</p>
+              <h2>Student roster</h2>
               <p className="intro">Open a student to export a date-range attendance statement as Excel or PDF with daily P, Ab, and L codes.</p>
             </div>
                      <div className="filter-row">
@@ -3394,7 +3473,7 @@ function App() {
           )}
         </section>
 
-        <section className="panel panel-table">
+        <section className="panel panel-table" id="attendance">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Daily attendance</p>
@@ -3505,7 +3584,7 @@ function App() {
           )}
         </section>
 
-        <section className="panel panel-table">
+        <section className="panel panel-table" id="reports">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Reports & exports</p>
@@ -3538,6 +3617,7 @@ function App() {
           </p>
         </section>
       </main>
+      </div>
 
       {/* ---- Added: per-student attendance date-range statement modal ---- */}
       {attendanceReportStudent && (

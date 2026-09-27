@@ -260,3 +260,47 @@ export async function getClassworkPhotoUrl(photoPath) {
   if (error) throw error
   return data?.signedUrl || null
 }
+
+export async function fetchAllFeeRecords() {
+  const { data, error } = await supabase.from('fee_records').select('*')
+  if (error) throw error
+  return data || []
+}
+
+export async function fetchAllFeePayments() {
+  const { data, error } = await supabase.from('fee_payments').select('*').order('payment_date', { ascending: false })
+  if (error) throw error
+  return data || []
+}
+
+// Creates or updates the fee configuration (total fee / next installment) for a student.
+export async function upsertFeeRecord({ studentId, totalFee, nextInstallmentAmount, nextDueDate }) {
+  const { data, error } = await supabase
+    .from('fee_records')
+    .upsert(
+      [
+        {
+          student_id: studentId,
+          total_fee: totalFee,
+          next_installment_amount: nextInstallmentAmount,
+          next_due_date: nextDueDate || null,
+          updated_at: new Date().toISOString()
+        }
+      ],
+      { onConflict: 'student_id' }
+    )
+  if (error) throw error
+  return data
+}
+
+export async function addFeePayment({ studentId, amount, paymentDate }) {
+  const { data, error } = await supabase.from('fee_payments').insert([
+    {
+      student_id: studentId,
+      amount,
+      payment_date: paymentDate
+    }
+  ])
+  if (error) throw error
+  return data
+}

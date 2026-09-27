@@ -29,7 +29,11 @@ import {
   deleteNote,
   fetchAllBehavior,
   addBehavior,
-  deleteBehavior
+  deleteBehavior,
+  fetchAllFeeRecords,
+  fetchAllFeePayments,
+  upsertFeeRecord,
+  addFeePayment
 } from './supabaseClient'
 import {
   downloadClassPdfReport,
@@ -43,6 +47,17 @@ import {
   downloadClassMarksRegisterExcel
 } from './reportUtils'
 import { downloadClassworkPdf, shareClassworkOnWhatsApp } from './classworkUtils'
+import {
+  FEE_STATUS,
+  FEE_STATUS_LABELS,
+  UPCOMING_REMINDER_DAYS,
+  calculateTotalPaid,
+  calculateRemaining,
+  calculateFeeStatus,
+  getFeeReminder,
+  formatCurrency,
+  formatDate
+} from './feeUtils'
 import './App.css'
 
 function getTodayDateString() {
@@ -130,6 +145,7 @@ function App() {
   const isMarksRoute = typeof window !== 'undefined' && window.location.pathname === '/marks'
   const isNotesRoute = typeof window !== 'undefined' && window.location.pathname === '/notes'
   const isBehaviorRoute = typeof window !== 'undefined' && window.location.pathname === '/behavior'
+  const isFeesRoute = typeof window !== 'undefined' && window.location.pathname === '/fees'
   const [session, setSession] = useState(null)
   const [theme, setTheme] = useState(() => {
     if (typeof window === 'undefined') return 'dark'
@@ -214,6 +230,23 @@ function App() {
   const [behaviorSaving, setBehaviorSaving] = useState(false)
   const [behaviorError, setBehaviorError] = useState('')
   const [behaviorNotice, setBehaviorNotice] = useState('')
+
+  const [feeRecords, setFeeRecords] = useState([])
+  const [feePayments, setFeePayments] = useState([])
+  const [feesLoading, setFeesLoading] = useState(false)
+  const [feesError, setFeesError] = useState('')
+  const [feeStatusFilter, setFeeStatusFilter] = useState('all')
+  const [feeClassFilter, setFeeClassFilter] = useState('all')
+  const [feeSearch, setFeeSearch] = useState('')
+  const [selectedFeeStudentId, setSelectedFeeStudentId] = useState(null)
+  const [feeConfigForm, setFeeConfigForm] = useState({ totalFee: '', nextInstallmentAmount: '', nextDueDate: '' })
+  const [feeConfigSaving, setFeeConfigSaving] = useState(false)
+  const [feeConfigError, setFeeConfigError] = useState('')
+  const [feeConfigNotice, setFeeConfigNotice] = useState('')
+  const [paymentForm, setPaymentForm] = useState({ amount: '', paymentDate: getTodayDateString() })
+  const [paymentSaving, setPaymentSaving] = useState(false)
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentNotice, setPaymentNotice] = useState('')
 
   const [attendanceReportStudent, setAttendanceReportStudent] = useState(null)
   const [attendanceReportStartDate, setAttendanceReportStartDate] = useState('')
@@ -328,6 +361,12 @@ function App() {
   useEffect(() => {
     if (session && accessChecked) {
       loadBehavior()
+    }
+  }, [session, accessChecked])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadFees()
     }
   }, [session, accessChecked])
 
@@ -1293,6 +1332,131 @@ function App() {
     }
   }
 
+  async function loadFees() {
+    setFeesLoading(true)
+    setFeesError('')
+
+    try {
+      const [records, payments] = await Promise.all([fetchAllFeeRecords(), fetchAllFeePayments()])
+      setFeeRecords(records)
+      setFeePayments(payments)
+    } catch (err) {
+      setFeesError(err.message || 'Unable to load fee records')
+    } finally {
+      setFeesLoading(false)
+    }
+  }
+
+  function handleOpenFeeDetails(student) {
+    const record = feeRecords.find((r) => r.student_id === student.id)
+    setFeeConfigForm({
+      totalFee: record ? String(record.total_fee) : '',
+      nextInstallmentAmount: record?.next_installment_amount != null ? String(record.next_installment_amount) : '',
+      nextDueDate: record?.next_due_date || ''
+    })
+    setFeeConfigError('')
+    setFeeConfigNotice('')
+    setPaymentForm({ amount: '', paymentDate: getTodayDateString() })
+    setPaymentError('')
+    setPaymentNotice('')
+    setSelectedFeeStudentId(student.id)
+  }
+
+  function handleCloseFeeDetails() {
+    setSelectedFeeStudentId(null)
+  }
+
+  function handleFeeConfigFieldChange(field, value) {
+    setFeeConfigForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSaveFeeConfig(e) {
+    e.preventDefault()
+    setFeeConfigError('')
+    setFeeConfigNotice('')
+
+    const totalFee = Number(feeConfigForm.totalFee)
+    const nextInstallmentAmount =
+      feeConfigForm.nextInstallmentAmount === '' ? null : Number(feeConfigForm.nextInstallmentAmount)
+
+    if (Number.isNaN(totalFee) || totalFee < 0) {
+      setFeeConfigError('Total fee must be a valid, non-negative amount.')
+      return
+    }
+    if (nextInstallmentAmount !== null && (Number.isNaN(nextInstallmentAmount) || nextInstallmentAmount < 0)) {
+      setFeeConfigError('Installment amount cannot be negative.')
+      return
+    }
+    if (feeConfigForm.nextDueDate && Number.isNaN(new Date(feeConfigForm.nextDueDate).getTime())) {
+      setFeeConfigError('Due date is invalid.')
+      return
+    }
+
+    setFeeConfigSaving(true)
+
+    try {
+      await upsertFeeRecord({
+        studentId: selectedFeeStudentId,
+        totalFee,
+        nextInstallmentAmount,
+        nextDueDate: feeConfigForm.nextDueDate || null
+      })
+      setFeeConfigNotice('Fee details saved.')
+      await loadFees()
+    } catch (err) {
+      setFeeConfigError(err.message || 'Unable to save fee details')
+    } finally {
+      setFeeConfigSaving(false)
+    }
+  }
+
+  function handlePaymentFieldChange(field, value) {
+    setPaymentForm((prev) => ({ ...prev, [field]: value }))
+  }
+
+  async function handleSavePayment(e) {
+    e.preventDefault()
+    setPaymentError('')
+    setPaymentNotice('')
+
+    const amount = Number(paymentForm.amount)
+    const record = feeRecords.find((r) => r.student_id === selectedFeeStudentId)
+
+    if (!record) {
+      setPaymentError('Set the total fee for this student before recording a payment.')
+      return
+    }
+    if (!amount || amount <= 0) {
+      setPaymentError('Payment amount must be greater than 0.')
+      return
+    }
+    if (!paymentForm.paymentDate || Number.isNaN(new Date(paymentForm.paymentDate).getTime())) {
+      setPaymentError('Payment date is invalid.')
+      return
+    }
+
+    const totalPaid = calculateTotalPaid(feePayments.filter((p) => p.student_id === selectedFeeStudentId))
+    const remaining = calculateRemaining(record.total_fee, totalPaid)
+
+    if (amount > remaining) {
+      setPaymentError(`Payment cannot exceed the remaining balance of ${formatCurrency(remaining)}.`)
+      return
+    }
+
+    setPaymentSaving(true)
+
+    try {
+      await addFeePayment({ studentId: selectedFeeStudentId, amount, paymentDate: paymentForm.paymentDate })
+      setPaymentForm({ amount: '', paymentDate: getTodayDateString() })
+      setPaymentNotice('Payment recorded successfully.')
+      await loadFees()
+    } catch (err) {
+      setPaymentError(err.message || 'Unable to save payment')
+    } finally {
+      setPaymentSaving(false)
+    }
+  }
+
   const classes = useMemo(() => {
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
@@ -1401,6 +1565,80 @@ function App() {
         ? behaviorEntriesWithStudent
         : behaviorEntriesWithStudent.filter((entry) => entry.student?.className === behaviorClassFilter),
     [behaviorEntriesWithStudent, behaviorClassFilter]
+  )
+
+  // One row per student combining their fee record + payment history into derived stats/status.
+  const feeRows = useMemo(() => {
+    const paymentsByStudent = new Map()
+    feePayments.forEach((payment) => {
+      const list = paymentsByStudent.get(payment.student_id) || []
+      list.push(payment)
+      paymentsByStudent.set(payment.student_id, list)
+    })
+
+    const recordByStudent = new Map(feeRecords.map((record) => [record.student_id, record]))
+
+    return students.map((student) => {
+      const record = recordByStudent.get(student.id) || null
+      const payments = (paymentsByStudent.get(student.id) || []).sort(
+        (a, b) => new Date(b.payment_date) - new Date(a.payment_date)
+      )
+      const totalPaid = calculateTotalPaid(payments)
+      const remaining = record ? calculateRemaining(record.total_fee, totalPaid) : 0
+      const status = record
+        ? calculateFeeStatus({ totalFee: record.total_fee, totalPaid, nextDueDate: record.next_due_date })
+        : null
+      const reminder = record
+        ? getFeeReminder({
+            studentName: student.name,
+            nextInstallmentAmount: record.next_installment_amount,
+            nextDueDate: record.next_due_date,
+            remaining
+          })
+        : null
+
+      return { student, record, payments, totalPaid, remaining, status, reminder }
+    })
+  }, [students, feeRecords, feePayments])
+
+  const feeSummary = useMemo(() => {
+    const withRecord = feeRows.filter((row) => row.record)
+    return {
+      totalStudentsWithFee: withRecord.length,
+      totalFees: withRecord.reduce((sum, row) => sum + Number(row.record.total_fee || 0), 0),
+      totalCollected: withRecord.reduce((sum, row) => sum + row.totalPaid, 0),
+      totalOutstanding: withRecord.reduce((sum, row) => sum + row.remaining, 0),
+      upcomingCount: feeRows.filter((row) => row.reminder && row.reminder.level !== 'overdue').length,
+      overdueCount: feeRows.filter((row) => row.reminder && row.reminder.level === 'overdue').length
+    }
+  }, [feeRows])
+
+  const feeReminders = useMemo(
+    () =>
+      feeRows
+        .filter((row) => row.reminder)
+        .sort((a, b) => (a.reminder.level === 'overdue' ? -1 : b.reminder.level === 'overdue' ? 1 : 0)),
+    [feeRows]
+  )
+
+  const filteredFeeRows = useMemo(
+    () =>
+      feeRows.filter((row) => {
+        const matchesClass = feeClassFilter === 'all' || row.student.className === feeClassFilter
+        const matchesStatus =
+          feeStatusFilter === 'all' || (row.status ? row.status === feeStatusFilter : feeStatusFilter === 'NOT_SET')
+        const matchesSearch = [row.student.name, row.student.rollNo]
+          .join(' ')
+          .toLowerCase()
+          .includes(feeSearch.toLowerCase())
+        return matchesClass && matchesStatus && matchesSearch
+      }),
+    [feeRows, feeClassFilter, feeStatusFilter, feeSearch]
+  )
+
+  const selectedFeeRow = useMemo(
+    () => feeRows.find((row) => row.student.id === selectedFeeStudentId) || null,
+    [feeRows, selectedFeeStudentId]
   )
 
     const filteredStudents = students
@@ -2494,6 +2732,315 @@ function App() {
     )
   }
 
+  if (isFeesRoute) {
+    return (
+      <div className="app-shell">
+        <header className="app-header">
+          <div>
+            <img className="brand-mark" src="/pwa/icon-mark.svg" alt="ClassPulse mark" />
+            <p className="eyebrow">Teacher Intelligence</p>
+            <h1>Fee Tracking</h1>
+          </div>
+          <div className="header-actions">
+            <button type="button" className="button tertiary" onClick={handleToggleTheme}>
+              {theme === 'light' ? 'Dark Theme' : 'Light Theme'}
+            </button>
+            <span className="session-email">{session.user.email}</span>
+            <a href="/" className="button secondary" role="button">
+              Back to app
+            </a>
+            <button type="button" className="button tertiary" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Overview</p>
+                <h2>Fee summary</h2>
+              </div>
+            </div>
+            <div className="fee-summary-grid">
+              <div className="fee-stat">
+                <span className="fee-stat-label">Students with fee records</span>
+                <span className="fee-stat-value">{feeSummary.totalStudentsWithFee}</span>
+              </div>
+              <div className="fee-stat">
+                <span className="fee-stat-label">Total fees</span>
+                <span className="fee-stat-value">{formatCurrency(feeSummary.totalFees)}</span>
+              </div>
+              <div className="fee-stat">
+                <span className="fee-stat-label">Total collected</span>
+                <span className="fee-stat-value">{formatCurrency(feeSummary.totalCollected)}</span>
+              </div>
+              <div className="fee-stat">
+                <span className="fee-stat-label">Total outstanding</span>
+                <span className="fee-stat-value">{formatCurrency(feeSummary.totalOutstanding)}</span>
+              </div>
+              <div className="fee-stat">
+                <span className="fee-stat-label">Upcoming payments</span>
+                <span className="fee-stat-value">{feeSummary.upcomingCount}</span>
+              </div>
+              <div className="fee-stat">
+                <span className="fee-stat-label">Overdue payments</span>
+                <span className="fee-stat-value fee-stat-danger">{feeSummary.overdueCount}</span>
+              </div>
+            </div>
+          </section>
+
+          {feeReminders.length > 0 && (
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Reminders</p>
+                  <h2>Upcoming &amp; overdue installments</h2>
+                </div>
+              </div>
+              <ul className="fee-reminder-list">
+                {feeReminders.map((row) => (
+                  <li key={row.student.id} className={`fee-reminder-item fee-reminder-${row.reminder.level}`}>
+                    {row.reminder.message}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="panel panel-table">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Students</p>
+                <h2>Fee status</h2>
+              </div>
+              <div className="filter-row">
+                <input
+                  type="search"
+                  placeholder="Search by name or roll no"
+                  value={feeSearch}
+                  onChange={(e) => setFeeSearch(e.target.value)}
+                />
+                <select value={feeClassFilter} onChange={(e) => setFeeClassFilter(e.target.value)}>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className === 'all' ? 'All classes' : className}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="attendance-status-group">
+              {['all', FEE_STATUS.PENDING, FEE_STATUS.PARTIALLY_PAID, FEE_STATUS.OVERDUE, FEE_STATUS.PAID].map(
+                (statusOption) => (
+                  <button
+                    key={statusOption}
+                    type="button"
+                    className={`status-button ${feeStatusFilter === statusOption ? 'active' : ''}`}
+                    onClick={() => setFeeStatusFilter(statusOption)}
+                  >
+                    {statusOption === 'all' ? 'All' : FEE_STATUS_LABELS[statusOption]}
+                  </button>
+                )
+              )}
+            </div>
+
+            {feesLoading && <p className="empty-state">Loading fee records...</p>}
+            {feesError && <div className="alert error">{feesError}</div>}
+
+            {!feesLoading && filteredFeeRows.length === 0 && (
+              <p className="empty-state">No students match this filter.</p>
+            )}
+
+            {!feesLoading && filteredFeeRows.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Total Fee</th>
+                      <th>Paid</th>
+                      <th>Remaining</th>
+                      <th>Next Due</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFeeRows.map((row) => (
+                      <tr key={row.student.id}>
+                        <td data-label="Student">
+                          {row.student.name} <span className="fee-roll">#{row.student.rollNo}</span>
+                        </td>
+                        <td data-label="Total Fee">{row.record ? formatCurrency(row.record.total_fee) : '—'}</td>
+                        <td data-label="Paid">{row.record ? formatCurrency(row.totalPaid) : '—'}</td>
+                        <td data-label="Remaining">{row.record ? formatCurrency(row.remaining) : '—'}</td>
+                        <td data-label="Next Due">{row.record?.next_due_date ? formatDate(row.record.next_due_date) : '—'}</td>
+                        <td data-label="Status">
+                          <span className={`fee-badge fee-badge-${row.status ? row.status.toLowerCase() : 'not-set'}`}>
+                            {row.status ? FEE_STATUS_LABELS[row.status] : 'Not Set'}
+                          </span>
+                        </td>
+                        <td className="table-actions" data-label="Actions">
+                          <button className="button tertiary" onClick={() => handleOpenFeeDetails(row.student)}>
+                            {row.record ? 'View' : 'Set Fee'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+
+        {selectedFeeRow && (
+          <div className="modal-overlay" onClick={handleCloseFeeDetails}>
+            <div className="panel modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Fee details</p>
+                  <h2>{selectedFeeRow.student.name}</h2>
+                </div>
+                <button type="button" className="button tertiary" onClick={handleCloseFeeDetails}>
+                  Close
+                </button>
+              </div>
+
+              {selectedFeeRow.record && (
+                <div className="fee-summary-grid">
+                  <div className="fee-stat">
+                    <span className="fee-stat-label">Total Fees</span>
+                    <span className="fee-stat-value">{formatCurrency(selectedFeeRow.record.total_fee)}</span>
+                  </div>
+                  <div className="fee-stat">
+                    <span className="fee-stat-label">Paid</span>
+                    <span className="fee-stat-value">{formatCurrency(selectedFeeRow.totalPaid)}</span>
+                  </div>
+                  <div className="fee-stat">
+                    <span className="fee-stat-label">Remaining</span>
+                    <span className="fee-stat-value">{formatCurrency(selectedFeeRow.remaining)}</span>
+                  </div>
+                  <div className="fee-stat">
+                    <span className="fee-stat-label">Status</span>
+                    <span className={`fee-badge fee-badge-${selectedFeeRow.status.toLowerCase()}`}>
+                      {FEE_STATUS_LABELS[selectedFeeRow.status]}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <form className="student-form" onSubmit={handleSaveFeeConfig}>
+                <p className="eyebrow">{selectedFeeRow.record ? 'Update installment' : 'Set fee'}</p>
+                <div className="field-grid">
+                  <div className="field-group">
+                    <label htmlFor="feeTotalFee">Total Fee</label>
+                    <input
+                      id="feeTotalFee"
+                      type="number"
+                      min="0"
+                      value={feeConfigForm.totalFee}
+                      onChange={(e) => handleFeeConfigFieldChange('totalFee', e.target.value)}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <label htmlFor="feeNextInstallmentAmount">Next Installment</label>
+                    <input
+                      id="feeNextInstallmentAmount"
+                      type="number"
+                      min="0"
+                      value={feeConfigForm.nextInstallmentAmount}
+                      onChange={(e) => handleFeeConfigFieldChange('nextInstallmentAmount', e.target.value)}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <label htmlFor="feeNextDueDate">Due Date</label>
+                    <input
+                      id="feeNextDueDate"
+                      type="date"
+                      value={feeConfigForm.nextDueDate}
+                      onChange={(e) => handleFeeConfigFieldChange('nextDueDate', e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {feeConfigError && <div className="alert error">{feeConfigError}</div>}
+                {feeConfigNotice && <div className="alert success">{feeConfigNotice}</div>}
+
+                <div className="form-actions">
+                  <button type="submit" className="button primary" disabled={feeConfigSaving}>
+                    {feeConfigSaving ? 'Saving...' : 'Save Fee Details'}
+                  </button>
+                </div>
+              </form>
+
+              {selectedFeeRow.record && (
+                <>
+                  <form className="student-form" onSubmit={handleSavePayment}>
+                    <p className="eyebrow">Add payment</p>
+                    <p className="intro">Remaining: {formatCurrency(selectedFeeRow.remaining)}</p>
+                    <div className="field-grid">
+                      <div className="field-group">
+                        <label htmlFor="paymentAmount">Amount</label>
+                        <input
+                          id="paymentAmount"
+                          type="number"
+                          min="0"
+                          value={paymentForm.amount}
+                          onChange={(e) => handlePaymentFieldChange('amount', e.target.value)}
+                        />
+                      </div>
+                      <div className="field-group">
+                        <label htmlFor="paymentDate">Payment Date</label>
+                        <input
+                          id="paymentDate"
+                          type="date"
+                          value={paymentForm.paymentDate}
+                          onChange={(e) => handlePaymentFieldChange('paymentDate', e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {paymentError && <div className="alert error">{paymentError}</div>}
+                    {paymentNotice && <div className="alert success">{paymentNotice}</div>}
+
+                    <div className="form-actions">
+                      <button type="submit" className="button primary" disabled={paymentSaving}>
+                        {paymentSaving ? 'Saving...' : 'Save Payment'}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">History</p>
+                      <h2>Payment history</h2>
+                    </div>
+                  </div>
+
+                  {selectedFeeRow.payments.length === 0 ? (
+                    <p className="empty-state">No payments recorded yet.</p>
+                  ) : (
+                    <ul className="fee-payment-history">
+                      {selectedFeeRow.payments.map((payment) => (
+                        <li key={payment.id}>
+                          {formatDate(payment.payment_date)} → {formatCurrency(payment.amount)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -2519,6 +3066,9 @@ function App() {
           <a href="/behavior" className="button tertiary" role="button">
             Behavior
           </a>
+          <a href="/fees" className="button tertiary" role="button">
+            Fees
+          </a>
           {userRole === 'admin' && (
             <a href="/admin" className="button tertiary" role="button">
               Admin Setup
@@ -2531,6 +3081,33 @@ function App() {
       </header>
 
       <main>
+        {(feeSummary.overdueCount > 0 || feeSummary.upcomingCount > 0) && (
+          <section className="panel fee-alerts-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Notifications</p>
+                <h2>Fee Alerts</h2>
+              </div>
+              <a href="/fees" className="button tertiary" role="button">
+                View Fees
+              </a>
+            </div>
+            <ul className="fee-reminder-list">
+              {feeSummary.overdueCount > 0 && (
+                <li className="fee-reminder-item fee-reminder-overdue">
+                  🔴 {feeSummary.overdueCount} overdue payment{feeSummary.overdueCount === 1 ? '' : 's'}
+                </li>
+              )}
+              {feeSummary.upcomingCount > 0 && (
+                <li className="fee-reminder-item fee-reminder-upcoming">
+                  🟠 {feeSummary.upcomingCount} payment{feeSummary.upcomingCount === 1 ? '' : 's'} due within{' '}
+                  {UPCOMING_REMINDER_DAYS} days
+                </li>
+              )}
+            </ul>
+          </section>
+        )}
+
         {isStudentsTableMissing && (
           <section className="panel setup-panel">
             <p className="eyebrow">Database setup</p>

@@ -28,6 +28,76 @@ export async function getUserProfileRole(userId) {
   return data?.role || 'teacher'
 }
 
+export async function getUserProfileContext(userId) {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('role, school_id')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data || { role: 'teacher', school_id: null }
+}
+
+export async function fetchSchools() {
+  const { data, error } = await supabase
+    .from('schools')
+    .select('id, name, active, created_at')
+    .eq('active', true)
+    .order('name')
+  if (error) throw error
+  return data || []
+}
+
+export async function addSchool(name) {
+  const { data, error } = await supabase
+    .from('schools')
+    .insert([{ name: name.trim() }])
+    .select('id, name, active, created_at')
+    .single()
+  if (error) throw error
+  const { error: seedError } = await supabase.rpc('seed_school_classes', { p_school_id: data.id })
+  if (seedError) throw seedError
+  return data
+}
+
+export async function fetchManagedClasses(schoolId = null) {
+  let query = supabase
+    .from('school_classes')
+    .select('id, school_id, name, sort_order, active, class_divisions(id, name, active)')
+    .eq('active', true)
+    .order('sort_order')
+    .order('name')
+
+  if (schoolId) query = query.eq('school_id', schoolId)
+  const { data, error } = await query
+  if (error) throw error
+  return (data || []).map((item) => ({
+    ...item,
+    divisions: (item.class_divisions || []).filter((division) => division.active).sort((a, b) => a.name.localeCompare(b.name))
+  }))
+}
+
+export async function addManagedClass({ schoolId, name, sortOrder = 0 }) {
+  const { data, error } = await supabase
+    .from('school_classes')
+    .insert([{ school_id: schoolId, name: name.trim(), sort_order: Number(sortOrder) || 0 }])
+    .select('id, school_id, name, sort_order, active')
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function addClassDivision({ classId, name }) {
+  const { data, error } = await supabase
+    .from('class_divisions')
+    .insert([{ class_id: classId, name: name.trim() }])
+    .select('id, class_id, name, active')
+    .single()
+  if (error) throw error
+  return data
+}
+
 export async function adminSearchTeachers(searchTerm = '') {
   const { data, error } = await supabase.rpc('admin_search_teachers', {
     p_search: searchTerm
@@ -44,6 +114,15 @@ export async function adminSetTeacherPassword(teacherUserId, newPassword, validD
     p_valid_days: validDays
   })
 
+  if (error) throw error
+  return data
+}
+
+export async function adminSetTeacherSchool(teacherUserId, schoolId) {
+  const { data, error } = await supabase.rpc('admin_set_teacher_school', {
+    p_teacher_user_id: teacherUserId,
+    p_school_id: schoolId || null
+  })
   if (error) throw error
   return data
 }

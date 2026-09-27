@@ -1,5 +1,9 @@
 # React + Vite
 
+## Managed schools and classes
+
+Run `supabase/sql/manage_schools_classes.sql` in the Supabase SQL Editor after the existing authentication and student migrations. Then rerun `supabase/sql/admin_set_teacher_password.sql` so the teacher search RPC includes school assignments. Use `/admin` to create schools, manage classes and divisions, and assign teachers to schools. Teachers will see only the catalog for their assigned school; existing records without catalog IDs remain available through the legacy class fallback until they are edited or backfilled.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

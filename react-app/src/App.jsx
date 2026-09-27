@@ -10,6 +10,13 @@ import {
   getStudentPhotoUrl,
   getPasswordPolicy,
   getUserProfileRole,
+  getUserProfileContext,
+  fetchSchools,
+  addSchool,
+  fetchManagedClasses,
+  addManagedClass,
+  addClassDivision,
+  adminSetTeacherSchool,
   adminSearchTeachers,
   adminSetTeacherPassword,
   requestPasswordReset,
@@ -140,6 +147,9 @@ const initialStudentForm = {
   name: '',
   rollNo: '',
   className: '',
+  schoolId: '',
+  classId: '',
+  divisionId: '',
   fatherName: '',
   motherName: '',
   parentPhone: '',
@@ -228,16 +238,29 @@ function App() {
   const [teacherList, setTeacherList] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
   const [selectedTeacher, setSelectedTeacher] = useState(null)
+  const [selectedTeacherSchoolId, setSelectedTeacherSchoolId] = useState('')
   const [newTeacherPassword, setNewTeacherPassword] = useState('')
   const [passwordValidDays, setPasswordValidDays] = useState(15)
   const [adminError, setAdminError] = useState('')
   const [adminNotice, setAdminNotice] = useState('')
+  const [schools, setSchools] = useState([])
+  const [managedClasses, setManagedClasses] = useState([])
+  const [assignedSchoolId, setAssignedSchoolId] = useState('')
+  const [catalogSchoolId, setCatalogSchoolId] = useState('')
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState('')
+  const [newSchoolName, setNewSchoolName] = useState('')
+  const [newClassName, setNewClassName] = useState('')
+  const [newClassSchoolId, setNewClassSchoolId] = useState('')
+  const [newDivisionName, setNewDivisionName] = useState('')
+  const [newDivisionClassId, setNewDivisionClassId] = useState('')
   const [students, setStudents] = useState([])
   const [form, setForm] = useState(initialStudentForm)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedClass, setSelectedClass] = useState('all')
+  const [selectedSchool, setSelectedSchool] = useState('all')
   const [attendanceDate, setAttendanceDate] = useState(getTodayDateString())
   const [attendanceClassFilter, setAttendanceClassFilter] = useState('all')
   const [attendanceIndex, setAttendanceIndex] = useState(0)
@@ -385,6 +408,12 @@ function App() {
       loadTeachers()
     }
   }, [session, userRole, isAdminRoute])
+
+  useEffect(() => {
+    if (session && accessChecked) {
+      loadCatalog()
+    }
+  }, [session, accessChecked, userRole])
 
   useEffect(() => {
     if (session && accessChecked && students.length > 0) {
@@ -696,6 +725,88 @@ function App() {
     }
   }
 
+  async function loadCatalog() {
+    setCatalogLoading(true)
+    setCatalogError('')
+
+    try {
+      const availableSchools = await fetchSchools()
+      setSchools(availableSchools)
+
+      let schoolId = assignedSchoolId
+      if (!schoolId && session?.user?.id) {
+        const profile = await getUserProfileContext(session.user.id)
+        schoolId = profile.school_id || ''
+        setAssignedSchoolId(schoolId)
+      }
+
+      const availableClasses = await fetchManagedClasses(userRole === 'admin' ? null : schoolId || null)
+      setManagedClasses(availableClasses)
+
+      if (userRole === 'admin' && !catalogSchoolId && availableSchools[0]) {
+        setCatalogSchoolId(availableSchools[0].id)
+        setNewClassSchoolId(availableSchools[0].id)
+      }
+    } catch (err) {
+      setManagedClasses([])
+      setCatalogError(
+        err?.code === '42P01'
+          ? 'Run manage_schools_classes.sql in Supabase to enable managed schools and classes.'
+          : err.message || 'Unable to load managed schools and classes'
+      )
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
+
+  async function handleAddSchool(event) {
+    event.preventDefault()
+    if (!newSchoolName.trim()) return
+
+    setCatalogLoading(true)
+    setCatalogError('')
+    try {
+      await addSchool(newSchoolName)
+      setNewSchoolName('')
+      await loadCatalog()
+    } catch (err) {
+      setCatalogError(err.message || 'Unable to add school')
+      setCatalogLoading(false)
+    }
+  }
+
+  async function handleAddManagedClass(event) {
+    event.preventDefault()
+    if (!newClassName.trim() || !newClassSchoolId) return
+
+    setCatalogLoading(true)
+    setCatalogError('')
+    try {
+      await addManagedClass({ schoolId: newClassSchoolId, name: newClassName })
+      setNewClassName('')
+      await loadCatalog()
+    } catch (err) {
+      setCatalogError(err.message || 'Unable to add class')
+      setCatalogLoading(false)
+    }
+  }
+
+  async function handleAddDivision(event) {
+    event.preventDefault()
+    if (!newDivisionName.trim() || !newDivisionClassId) return
+
+    setCatalogLoading(true)
+    setCatalogError('')
+    try {
+      await addClassDivision({ classId: newDivisionClassId, name: newDivisionName })
+      setNewDivisionName('')
+      await loadCatalog()
+    } catch (err) {
+      setCatalogError(err.message || 'Unable to add division')
+      setCatalogLoading(false)
+    }
+  }
+
   async function handleAdminSearch(event) {
     event.preventDefault()
     await loadTeachers()
@@ -726,6 +837,27 @@ function App() {
       await loadTeachers()
     } catch (err) {
       setAdminError(err.message || 'Unable to set teacher PIN')
+    } finally {
+      setAdminLoading(false)
+    }
+  }
+
+  async function handleSetTeacherSchool(event) {
+    event.preventDefault()
+    if (!selectedTeacher) {
+      setAdminError('Select a teacher first.')
+      return
+    }
+
+    setAdminError('')
+    setAdminNotice('')
+    setAdminLoading(true)
+    try {
+      await adminSetTeacherSchool(selectedTeacher.teacher_user_id, selectedTeacherSchoolId)
+      setAdminNotice(`School assignment updated for ${selectedTeacher.email}`)
+      await loadTeachers()
+    } catch (err) {
+      setAdminError(err.message || 'Unable to assign teacher school')
     } finally {
       setAdminLoading(false)
     }
@@ -772,8 +904,15 @@ function App() {
         name: studentPayload.name.trim(),
         rollNo: studentPayload.rollNo.trim(),
         className: studentPayload.className.trim(),
+        school_id: form.schoolId || assignedSchoolId || null,
+        class_id: form.classId || null,
+        division_id: form.divisionId || null,
         dob: studentPayload.dob ? studentPayload.dob : null
       }
+
+      delete sanitizedStudentPayload.schoolId
+      delete sanitizedStudentPayload.classId
+      delete sanitizedStudentPayload.divisionId
 
       let photoPath = form.photo_path || null
       if (studentPhotoRemoved) {
@@ -836,7 +975,13 @@ function App() {
   }
 
   function handleEdit(student) {
-    setForm(student)
+    setForm({
+      ...initialStudentForm,
+      ...student,
+      schoolId: student.school_id || assignedSchoolId || '',
+      classId: student.class_id || '',
+      divisionId: student.division_id || ''
+    })
     setStudentPhotoFile(null)
     setStudentPhotoRemoved(false)
     setStudentPhotoPreview('')
@@ -1528,9 +1673,19 @@ function App() {
   }
 
   const classes = useMemo(() => {
+    if (managedClasses.length > 0) {
+      return ['all', ...managedClasses.map((managedClass) => managedClass.name)]
+    }
     const set = new Set(students.map((student) => student.className).filter(Boolean))
     return ['all', ...Array.from(set).sort()]
-  }, [students])
+  }, [managedClasses, students])
+
+  const studentClassOptions = useMemo(
+    () => managedClasses.filter((managedClass) => !form.schoolId || managedClass.school_id === form.schoolId),
+    [managedClasses, form.schoolId]
+  )
+
+  const selectedStudentClass = studentClassOptions.find((managedClass) => managedClass.id === form.classId)
 
    const attendanceStudents = useMemo(
     () =>
@@ -1731,11 +1886,12 @@ function App() {
         .join(' ')
         .toLowerCase()
         .includes(search.toLowerCase())
+      const matchesSchool = selectedSchool === 'all' || student.school_id === selectedSchool
       const matchesClass = selectedClass === 'all' || student.className === selectedClass
-      return matchesSearch && matchesClass
+      return matchesSearch && matchesSchool && matchesClass
     })
     .sort(compareByRollNo)
-  const shouldShowStudentRecords = selectedClass !== 'all'
+  const shouldShowStudentRecords = selectedClass !== 'all' || selectedSchool !== 'all'
 
   const isStudentsTableMissing =
     typeof error === 'string' && error.toLowerCase().includes("could not find the table 'public.students'")
@@ -1951,6 +2107,92 @@ function App() {
             <div className="student-form">
               {adminError && <div className="alert error">{adminError}</div>}
               {adminNotice && <div className="alert success">{adminNotice}</div>}
+              {catalogError && <div className="alert error">{catalogError}</div>}
+
+              <section className="panel" aria-labelledby="catalog-heading">
+                <div className="panel-head">
+                  <div>
+                    <p className="eyebrow">Organization</p>
+                    <h2 id="catalog-heading">Schools, classes and divisions</h2>
+                  </div>
+                  {catalogLoading && <span>Loading...</span>}
+                </div>
+
+                <form className="admin-search" onSubmit={handleAddSchool}>
+                  <div className="field-group">
+                    <label htmlFor="newSchoolName">Add school</label>
+                    <input
+                      id="newSchoolName"
+                      value={newSchoolName}
+                      onChange={(event) => setNewSchoolName(event.target.value)}
+                      placeholder="School name"
+                    />
+                  </div>
+                  <button type="submit" className="button secondary" disabled={catalogLoading || !newSchoolName.trim()}>
+                    Add school
+                  </button>
+                </form>
+
+                <form className="admin-search" onSubmit={handleAddManagedClass}>
+                  <div className="field-group">
+                    <label htmlFor="newClassSchool">School</label>
+                    <select
+                      id="newClassSchool"
+                      value={newClassSchoolId}
+                      onChange={(event) => setNewClassSchoolId(event.target.value)}
+                    >
+                      <option value="">Select school</option>
+                      {schools.map((school) => (
+                        <option key={school.id} value={school.id}>{school.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field-group">
+                    <label htmlFor="newClassName">Add class</label>
+                    <input
+                      id="newClassName"
+                      value={newClassName}
+                      onChange={(event) => setNewClassName(event.target.value)}
+                      placeholder="11th"
+                    />
+                  </div>
+                  <button type="submit" className="button secondary" disabled={catalogLoading || !newClassName.trim() || !newClassSchoolId}>
+                    Add class
+                  </button>
+                </form>
+
+                <form className="admin-search" onSubmit={handleAddDivision}>
+                  <div className="field-group">
+                    <label htmlFor="newDivisionClass">Class</label>
+                    <select
+                      id="newDivisionClass"
+                      value={newDivisionClassId}
+                      onChange={(event) => setNewDivisionClassId(event.target.value)}
+                    >
+                      <option value="">Select class</option>
+                      {managedClasses
+                        .filter((managedClass) => !newClassSchoolId || managedClass.school_id === newClassSchoolId)
+                        .map((managedClass) => (
+                          <option key={managedClass.id} value={managedClass.id}>
+                            {managedClass.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="field-group">
+                    <label htmlFor="newDivisionName">Add division</label>
+                    <input
+                      id="newDivisionName"
+                      value={newDivisionName}
+                      onChange={(event) => setNewDivisionName(event.target.value)}
+                      placeholder="A"
+                    />
+                  </div>
+                  <button type="submit" className="button secondary" disabled={catalogLoading || !newDivisionName.trim() || !newDivisionClassId}>
+                    Add division
+                  </button>
+                </form>
+              </section>
 
               <form className="admin-search" onSubmit={handleAdminSearch}>
                 <div className="field-group">
@@ -1972,7 +2214,10 @@ function App() {
                     key={teacher.teacher_user_id}
                     type="button"
                     className={`teacher-row ${selectedTeacher?.teacher_user_id === teacher.teacher_user_id ? 'active' : ''}`}
-                    onClick={() => setSelectedTeacher(teacher)}
+                    onClick={() => {
+                      setSelectedTeacher(teacher)
+                      setSelectedTeacherSchoolId(teacher.school_id || '')
+                    }}
                   >
                     <span>{teacher.email}</span>
                     <small>{teacher.full_name || 'No name'} | Expires: {teacher.password_expires_at || 'Not set'}</small>
@@ -1980,6 +2225,26 @@ function App() {
                 ))}
                 {!teacherList.length && <p className="intro">No teachers found yet. Run search to load list.</p>}
               </div>
+
+              <form className="admin-search" onSubmit={handleSetTeacherSchool}>
+                <div className="field-group">
+                  <label htmlFor="teacherSchoolAssignment">Selected teacher school</label>
+                  <select
+                    id="teacherSchoolAssignment"
+                    value={selectedTeacherSchoolId}
+                    onChange={(event) => setSelectedTeacherSchoolId(event.target.value)}
+                    disabled={!selectedTeacher}
+                  >
+                    <option value="">No school assigned</option>
+                    {schools.map((school) => (
+                      <option key={school.id} value={school.id}>{school.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button type="submit" className="button secondary" disabled={adminLoading || !selectedTeacher}>
+                  Save school assignment
+                </button>
+              </form>
 
               <form className="student-form" onSubmit={handleSetTeacherPin}>
                 <div className="field-group">
@@ -2122,12 +2387,27 @@ function App() {
                 </div>
                 <div className="field-group">
                   <label htmlFor="classworkClassName">Class</label>
-                  <input
-                    id="classworkClassName"
-                    value={classworkForm.className}
-                    onChange={(e) => handleClassworkFieldChange('className', e.target.value)}
-                    placeholder="e.g. 8A"
-                  />
+                  {managedClasses.length > 0 ? (
+                    <select
+                      id="classworkClassName"
+                      value={classworkForm.className}
+                      onChange={(e) => handleClassworkFieldChange('className', e.target.value)}
+                    >
+                      <option value="">Select class</option>
+                      {classes.filter((className) => className !== 'all').map((className) => (
+                        <option key={className} value={className}>
+                          {className}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      id="classworkClassName"
+                      value={classworkForm.className}
+                      onChange={(e) => handleClassworkFieldChange('className', e.target.value)}
+                      placeholder="Run the catalog migration first"
+                    />
+                  )}
                 </div>
                 <div className="field-group">
                   <label htmlFor="classworkSubject">Subject</label>
@@ -3259,13 +3539,54 @@ function App() {
               </div>
               <div className="field-group">
                 <label>Class</label>
-                <input
-                  value={form.className}
-                  onChange={(e) => setForm({ ...form, className: e.target.value })}
-                  placeholder="e.g. 8A"
-                />
+                {managedClasses.length > 0 ? (
+                  <select
+                    value={form.classId}
+                    onChange={(event) => {
+                      const selectedClass = managedClasses.find((managedClass) => managedClass.id === event.target.value)
+                      setForm({
+                        ...form,
+                        schoolId: selectedClass?.school_id || form.schoolId,
+                        classId: selectedClass?.id || '',
+                        className: selectedClass?.name || '',
+                        divisionId: ''
+                      })
+                    }}
+                  >
+                    <option value="">Select class</option>
+                    {studentClassOptions.map((managedClass) => (
+                      <option key={managedClass.id} value={managedClass.id}>
+                        {managedClass.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={form.className}
+                    onChange={(e) => setForm({ ...form, className: e.target.value })}
+                    placeholder="Run the catalog migration first"
+                  />
+                )}
               </div>
             </div>
+
+            {managedClasses.length > 0 && (
+              <div className="field-group">
+                <label>Division</label>
+                <select
+                  value={form.divisionId}
+                  onChange={(event) => setForm({ ...form, divisionId: event.target.value })}
+                  disabled={!selectedStudentClass?.divisions?.length}
+                >
+                  <option value="">No division</option>
+                  {selectedStudentClass?.divisions?.map((division) => (
+                    <option key={division.id} value={division.id}>
+                      Division {division.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="field-grid">
               <div className="field-group">
@@ -3381,6 +3702,16 @@ function App() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, roll, class"
               />
+              {userRole === 'admin' && (
+                <select value={selectedSchool} onChange={(e) => setSelectedSchool(e.target.value)}>
+                  <option value="all">All schools</option>
+                  {schools.map((school) => (
+                    <option key={school.id} value={school.id}>
+                      {school.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>
                 {classes.map((className) => (
                   <option key={className} value={className}>
@@ -3422,7 +3753,9 @@ function App() {
                   <tr>
                     <th>Name</th>
                     <th>Roll</th>
+                    <th>School</th>
                     <th>Class</th>
+                    <th>Division</th>
                     <th>Parent</th>
                     <th>Phone</th>
                     <th>Actions</th>
@@ -3433,7 +3766,13 @@ function App() {
                     <tr key={student.id}>
                       <td data-label="Name">{student.name}</td>
                       <td data-label="Roll">{student.rollNo}</td>
+                      <td data-label="School">{schools.find((school) => school.id === student.school_id)?.name || '—'}</td>
                       <td data-label="Class">{student.className}</td>
+                      <td data-label="Division">
+                        {managedClasses
+                          .flatMap((managedClass) => managedClass.divisions || [])
+                          .find((division) => division.id === student.division_id)?.name || '—'}
+                      </td>
                       <td data-label="Parent">{student.fatherName || student.motherName || '—'}</td>
                       <td data-label="Phone">{student.parentPhone || '—'}</td>
                       <td className="table-actions" data-label="Actions">
@@ -3460,7 +3799,7 @@ function App() {
                   ))}
                   {filteredStudents.length === 0 && (
                     <tr>
-                      <td colSpan="6" className="empty-state">
+                      <td colSpan="8" className="empty-state">
                         No students found. Adjust your filters or add a student.
                       </td>
                     </tr>

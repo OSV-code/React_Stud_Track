@@ -86,7 +86,8 @@ returns table (
   teacher_user_id uuid,
   email text,
   full_name text,
-  password_expires_at timestamptz
+  password_expires_at timestamptz,
+  school_id uuid
 )
 language plpgsql
 security definer
@@ -104,7 +105,7 @@ begin
   end if;
 
   return query
-  select up.user_id, au.email::text, up.full_name::text, pp.password_expires_at
+  select up.user_id, au.email::text, up.full_name::text, pp.password_expires_at, up.school_id
   from public.user_profiles up
   join auth.users au on au.id = up.user_id
   left join public.password_policies pp on pp.user_id = up.user_id
